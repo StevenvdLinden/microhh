@@ -25,12 +25,31 @@
 #include "field3d.h"
 #include "radiation_edwards.h"
 
+namespace
+{
+    int nlines;
+}
+
 Radiation_edwards::Radiation_edwards(Model* modelin, Input* inputin) : Radiation(modelin, inputin)
 {
-    swradiation = "0";
+    swradiation = "edwards";
+
+    int nerror = 0;
+    nerror += inputin->get_item(&nlines, "radiation", "nlines", "");
+
+    if (nerror)
+        throw 1;
 }
 
 Radiation_edwards::~Radiation_edwards()
+{
+}
+
+void Radiation_edwards::init()
+{
+}
+
+void Radiation_edwards::create(Input* inputin)
 {
 }
 

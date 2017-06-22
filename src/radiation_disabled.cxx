@@ -35,6 +35,14 @@ Radiation_disabled::~Radiation_disabled()
 {
 }
 
+void Radiation_disabled::init()
+{
+}
+
+void Radiation_disabled::create(Input* inputin)
+{
+}
+
 void Radiation_disabled::exec()
 {
 }

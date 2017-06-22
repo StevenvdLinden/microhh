@@ -167,11 +167,12 @@ void Model::init()
     grid  ->init();
     fields->init();
 
-    boundary->init(input);
-    buffer  ->init();
-    force   ->init();
-    pres    ->init();
-    thermo  ->init();
+    boundary ->init(input);
+    buffer   ->init();
+    force    ->init();
+    pres     ->init();
+    thermo   ->init();
+    radiation->init();
 
     stats ->init(timeloop->get_ifactor());
     cross ->init(timeloop->get_ifactor());
@@ -200,6 +201,7 @@ void Model::load()
     buffer->create(input);
     force ->create(input);
     thermo->create(input);
+    radiation->create(input);
 
     budget->create();
 

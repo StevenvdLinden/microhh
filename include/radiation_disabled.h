@@ -37,7 +37,10 @@ class Radiation_disabled : public Radiation
         Radiation_disabled(Model*, Input*); ///< Constructor of the radiation class.
         ~Radiation_disabled();              ///< Destructor of the radiation class.
 
+        void init();
+        void create(Input*);
         void exec(); ///< Execute the radiation scheme.
+
         void get_surface_radiation(Field3d*);
 };
 #endif
