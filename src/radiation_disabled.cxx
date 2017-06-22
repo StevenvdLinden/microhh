@@ -20,6 +20,7 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <iostream>
 #include "master.h"
 #include "model.h"
 #include "field3d.h"
