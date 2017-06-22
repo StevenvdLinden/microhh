@@ -20,46 +20,26 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <cstdio>
-#include <cmath>
-#include <algorithm>
 #include "master.h"
 #include "model.h"
-
-#include "radiation.h"
-#include "radiation_disabled.h"
+#include "field3d.h"
 #include "radiation_edwards.h"
 
-Radiation::Radiation(Model* modelin, Input* inputin)
+Radiation_edwards::Radiation_edwards(Model* modelin, Input* inputin) : Radiation(modelin, inputin)
 {
-    model  = modelin;
-    master = model->master;
-
     swradiation = "0";
 }
 
-Radiation::~Radiation()
+Radiation_edwards::~Radiation_edwards()
 {
 }
 
-Radiation* Radiation::factory(Master* masterin, Input* inputin, Model* modelin)
+void Radiation_edwards::exec()
 {
-    std::string swradiation;
-    if (inputin->get_item(&swradiation, "radiation", "swradiation", "", "0"))
-        throw 1;
-
-    if (swradiation == "0")
-        return new Radiation_disabled(modelin, inputin);
-    else if (swradiation == "edwards")
-        return new Radiation_edwards(modelin, inputin);
-    else
-    {
-        masterin->print_error("\"%s\" is an illegal value for swradiation\n", swradiation.c_str());
-        throw 1;
-    }
 }
 
-std::string Radiation::get_switch()
+void Radiation_edwards::get_surface_radiation(Field3d* Qnet)
 {
-    return swradiation;
+    master->print_error("Radiation_edwards can not provide surface radiation\n");
+    throw 1;
 }
