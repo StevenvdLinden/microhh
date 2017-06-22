@@ -34,6 +34,8 @@
 #include "pres.h"
 #include "thermo.h"
 #include "boundary.h"
+#include "thermo.h"
+#include "radiation.h"
 #include "buffer.h"
 #include "force.h"
 #include "stats.h"
@@ -52,14 +54,16 @@ Model::Model(Master *masterin, Input *inputin)
     input  = inputin;
 
     // Initialize the pointers as zero
-    grid     = 0;
-    fields   = 0;
-    diff     = 0;
-    pres     = 0;
-    thermo   = 0;
-    timeloop = 0;
-    force    = 0;
-    buffer   = 0;
+    grid      = 0;
+    fields    = 0;
+    diff      = 0;
+    pres      = 0;
+    thermo    = 0;
+    timeloop  = 0;
+    force     = 0;
+    buffer    = 0;
+    thermo    = 0;
+    radiation = 0 ;
 
     stats  = 0;
     cross  = 0;
@@ -75,15 +79,16 @@ Model::Model(Master *masterin, Input *inputin)
         fields = new Fields(this, input);
 
         // Create instances of the other model classes.
-        boundary = Boundary::factory(master, input, this);
-        advec    = Advec   ::factory(master, input, this, grid->swspatialorder);
-        diff     = Diff    ::factory(master, input, this, grid->swspatialorder);
-        pres     = Pres    ::factory(master, input, this, grid->swspatialorder);
-        thermo   = Thermo  ::factory(master, input, this);
+        boundary  = Boundary ::factory(master, input, this);
+        advec     = Advec    ::factory(master, input, this, grid->swspatialorder);
+        diff      = Diff     ::factory(master, input, this, grid->swspatialorder);
+        pres      = Pres     ::factory(master, input, this, grid->swspatialorder);
+        thermo    = Thermo   ::factory(master, input, this);
+        radiation = Radiation::factory(master, input, this);
 
-        timeloop = new Timeloop(this, input);
-        force    = new Force   (this, input);
-        buffer   = new Buffer  (this, input);
+        timeloop  = new Timeloop(this, input);
+        force     = new Force   (this, input);
+        buffer    = new Buffer  (this, input);
 
         // Create instances of the statistics classes. First create stats as it is required for init of derived stats.
         stats  = new Stats (this, input);
@@ -135,11 +140,12 @@ void Model::delete_objects()
     delete stats;
     delete buffer;
     delete force;
+    delete timeloop;
+    delete radiation;
+    delete thermo;
     delete pres;
     delete diff;
     delete advec;
-    delete timeloop;
-    delete thermo;
 
     delete boundary;
     delete fields;
@@ -269,6 +275,10 @@ void Model::exec()
 
         // Calculate the thermodynamics and the buoyancy tendency.
         thermo->exec();
+
+        // Execute the radiative tendency
+        radiation->exec();
+
         // Calculate the tendency due to damping in the buffer layer.
         buffer->exec();
 
