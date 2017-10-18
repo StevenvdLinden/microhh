@@ -62,8 +62,6 @@ namespace
     std::vector<double> fdn_above_0;
     std::vector<double> fdn_above_1;
 
-    std::vector<double> fl_dn_nr;
-    std::vector<double> fl_up_nr;
 }
 
 using namespace Finite_difference::O2;
@@ -77,7 +75,7 @@ Radiation_edwards::Radiation_edwards(Model* modelin, Input* inputin) : Radiation
     grid    = model->grid;
     fields  = model->fields;
     stats   = model->stats;
-   
+
     // obtain specific input parameters
     int nerror = 0;
     nerror += inputin->get_item(&nlines, "radiation", "nlines", "");
@@ -86,10 +84,6 @@ Radiation_edwards::Radiation_edwards(Model* modelin, Input* inputin) : Radiation
 
     if (nerror)
         throw 1;
-
-    // // declare variables
-    // upflux = 0;
-    // dnflux = 0;
 
     // add field for radiation tendency
     fields->init_diagnostic_field("radt", "Radiative tendency", "K s-1"); // Check units
@@ -114,9 +108,6 @@ void Radiation_edwards::init()
     pl1.resize(nlines);
     fdn_above_0.resize(nlines);
     fdn_above_1.resize(nlines);
-
-    fl_dn_nr.resize(grid->ncells);
-    fl_up_nr.resize(grid->ncells);
 }
 
 void Radiation_edwards::create(Input* inputin)
@@ -164,25 +155,42 @@ void Radiation_edwards::exec()
     //if ((iter % raditer) == 0 )
     if (fmod(time, dtrad) == 0)
     {
-        double* upflux = fields->atmp["tmp1"]->data;
-        double* dnflux = fields->atmp["tmp2"]->data;
+        double* upflux   = fields->atmp["tmp1"]->data;
+        double* dnflux   = fields->atmp["tmp1"]->data;
+        double* bandflux = fields->atmp["tmp2"]->data;
 
         for (int n=0; n<grid->ncells; ++n)
         {
             upflux[n] = 0;
+        }
+
+        if (grid->swspatialorder == "2")
+        {
+            calc_radiation_fluxes_up_2(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
+        }
+        else if (grid->swspatialorder == "4")
+        {
+            calc_radiation_fluxes_up_4(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
+        }
+
+        calc_radiation_tendency_up(fields->sd["radt"]->data, grid->dzh, upflux, arbc, crbc);
+
+        for (int n=0; n<grid->ncells; ++n)
+        {
             dnflux[n] = 0;
         }
 
         if (grid->swspatialorder == "2")
         {
-            calc_radiation_fluxes_2(upflux, dnflux, fields->sp["th"]->data, grid->dzh);
+            calc_radiation_fluxes_dn_2(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
         }
         else if (grid->swspatialorder == "4")
         {
-            calc_radiation_fluxes_4(upflux, dnflux, fields->sp["th"]->data, grid->dzh);
+            calc_radiation_fluxes_dn_4(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
         }
 
-        calc_radiation_tendency(fields->sd["radt"]->data, grid->dzh, upflux, dnflux, arbc, crbc);
+        calc_radiation_tendency_dn(fields->sd["radt"]->data, grid->dzh, upflux, arbc, crbc);
+
     }
 
     // Apply the radiative tendencies to the (relevant) temperature tendencies.
@@ -200,7 +208,7 @@ void Radiation_edwards::get_surface_radiation(Field3d* Qnet)
     throw 1;
 }
 
-void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double* restrict flux_dn, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+void Radiation_edwards::calc_radiation_fluxes_up_2(double* restrict flux_up, double* restrict fl_up_nr, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
 {
     const int ii  = 1;
     const int jj  = grid->icells;
@@ -215,17 +223,14 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double
 
     for (int kr=0; kr<nlines; ++kr)
     {
-
         // Calculate radiative fluxes at boundaries
         int kb = grid->kstart;
-        int ke = grid->kend;
 
         for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
             for (int i=grid->istart; i<grid->iend; ++i)
             {
                 const int ijk_bot = i + j*jj + kb*kk;
-                const int ijk_top = i + j*jj + ke*kk;
                 const int ij      = i + j*jj;
 
                 // 1] Nog de exner-functie doorgeven voor absolute temperatuur
@@ -235,9 +240,6 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double
                 fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * Tbot[ij];
                 // Bovenstaande zou ook vervangen kunnen worden door? Klopt dit dan nog met updaten temperatuurrandvoorwaarde?:
                 // fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * interp2(temp[ijk_bot],temp[ijk_bot-kk]);
-
-                // Incoming radiation at top op domain
-                fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * interp2(temp[ijk_top],temp[ijk_top-kk]);
             }
 
         // 25/09/2017 : Er zijn flink wat indices veranderd om in lijn te komen met standaard. Ter verduidelijking:
@@ -271,6 +273,62 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double
                     fl_up_nr[ijk] = bbt + trans * (fl_up_nr[ijk-kk] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau);
 
                 }
+
+        // 25/09/2017 : Er zijn in feite 2 manieren om dit te doen, je laat de loop bij k=kend beginnen
+        // en vervolgens bereken je de fluxen voor een niveau lager, of je begint bij kend-1, en berekent
+        // de fluxen voor dat niveau gebruikmakend van de temperaturen op zowel niveau hoger als niveau lager.
+        // Hier is voor de 1ste optie gekozen ook al loopt de loop dan wat anders,
+        // omdat zo de structuur binnenin de loops gelijk zijn aan de berekening van de upward fluxen.
+
+        // Sum upward fluxes
+        for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elements :P
+            for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+                for (int i=grid->istart; i<grid->iend; ++i)
+                {
+                    const int ijk = i + j*jj + k*kk;
+
+                    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
+                }
+    }
+
+}
+
+void Radiation_edwards::calc_radiation_fluxes_dn_2(double* restrict flux_dn, double* restrict fl_dn_nr, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+{
+    const int ii  = 1;
+    const int jj  = grid->icells;
+    const int kk  = grid->ijcells;
+    const int ntot= grid->ncells;
+
+    const double tau_min = 1e-8; // Constant minimal optical depth
+    const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
+    const double diffus = 1.66; // Optical diffusivity (what is the actual name?)
+
+    for (int kr=0; kr<nlines; ++kr)
+    {
+        // Calculate radiative fluxes at boundaries
+        int ke = grid->kend;
+
+        for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+            for (int i=grid->istart; i<grid->iend; ++i)
+            {
+                const int ijk_top = i + j*jj + ke*kk;
+                const int ij      = i + j*jj;
+
+                // 1] Nog de exner-functie doorgeven voor absolute temperatuur
+                // 2] Mail v. John: nog niet geheel duidelijk voor mij hoe bijv. hogere emissiviteit oppervlak hierin is verwerkt
+
+                // Incoming radiation at top op domain
+                fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * interp2(temp[ijk_top],temp[ijk_top-kk]);
+            }
+
+        // 25/09/2017 : Er zijn flink wat indices veranderd om in lijn te komen met standaard. Ter verduidelijking:
+        // upward flux tussen 1ste en 2de echte gridcell wordt opgeslagen op positie kstart+1, MAAR
+        // vereist dus laagdikte en vochtgehalte van de laag eronder index = (k-1);
+        // de temperatuur op te berekenen interface: interpolatie k en k-1;
+        // en temperatuur op interface eronder: interpolatie k-1 en k-2 !
 
         // 25/09/2017 : Er zijn in feite 2 manieren om dit te doen, je laat de loop bij k=kend beginnen
         // en vervolgens bereken je de fluxen voor een niveau lager, of je begint bij kend-1, en berekent
@@ -299,15 +357,12 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double
                     bbt = pl0[kr] + pl1[kr] * interp2(temp[ijk-kk], temp[ijk]);
                     bbb = pl0[kr] + pl1[kr] * interp2(temp[ijk-2*kk], temp[ijk-kk]);
 
-                    // Increment total upward flux with upward flux for current radiation band
-                    // Noot: voor een isotherme atmosfeer, doet laatste deel niks, omdat bbb = bbt --> 0*whatever
-                    // verschillen m.b.t. tot fortran code, geheel veroorzaakt door transmissivity
-                    //std::printf("tau: %.14f\ttransmissivity: %.14f\n", tau, trans);
+                    // Increment total downward flux with downward flux for current radiation band
                     fl_dn_nr[ijk-kk] = bbb + trans * (fl_dn_nr[ijk] - bbt) - (bbb - bbt) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
 
                 }
 
-        // Sum upward and downward fluxes
+        // Sum downward fluxes
         for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elementen :P
             for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
@@ -315,28 +370,14 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double
                 {
                     const int ijk = i + j*jj + k*kk;
 
-                    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
                     flux_dn[ijk] += fl_dn_nr[ijk]; // Sum different radiation bands together
-
                 }
     }
-
-    // Just for current printing of total radiative fluxes
-    for (int k=grid->kstart; k<(grid->kend+1); ++k)
-        for (int j=grid->jstart; j<grid->jend; ++j)
-#pragma ivdep
-            for (int i=grid->istart; i<grid->iend; ++i)
-            {
-                const int ijk = i + j*jj + k*kk;
-                const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
-                //std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
-            }
-
 }
 
 // 25/09/2017 : Aan de 4de-orde implementatie wordt nog gewerkt
 
-void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double* restrict flux_dn, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+void Radiation_edwards::calc_radiation_fluxes_up_4(double* restrict flux_up, double* restrict fl_up_nr, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
 {
     const int ii  = 1;
     const int jj  = grid->icells;
@@ -351,7 +392,6 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
 
     for (int kr=0; kr<nlines; ++kr)
     {
-
         // Calculate radiative fluxes at boundaries
         int kb = grid->kstart;
         int ke = grid->kend;
@@ -360,9 +400,7 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
 #pragma ivdep
             for (int i=grid->istart; i<grid->iend; ++i)
             {
-
                 const int ijk_bot = i + j*jj + kb*kk;
-                const int ijk_top = i + j*jj + ke*kk;
                 const int ij      = i + j*jj;
 
                 // 1] Nog de exner-functie doorgeven voor absolute temperatuur
@@ -372,9 +410,6 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
                 fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * Tbot[ij];
                 // Bovenstaande zou ook vervangen kunnen worden door? Klopt dit dan nog met updaten temperatuurrandvoorwaarde?:
                 // fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * interp2(temp[ijk_bot],temp[ijk_bot-kk]);
-
-                // Incoming radiation at top op domain
-                fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * interp4(temp[ijk_top-2*kk],temp[ijk_top-kk],temp[ijk_top],temp[ijk_top+kk]);
             }
 
         // 25/09/2017 : Er zijn flink wat indices veranderd om in lijn te komen met standaard. Ter verduidelijking:
@@ -415,6 +450,62 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
         // Hier is voor de 1ste optie gekozen ook al loopt de loop dan wat anders,
         // omdat zo de structuur binnenin de loops gelijk zijn aan de berekening van de upward fluxen.
 
+        // Sum upward fluxes
+        for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elementen :P
+            for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+                for (int i=grid->istart; i<grid->iend; ++i)
+                {
+                    const int ijk = i + j*jj + k*kk;
+
+                    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
+                }
+    }
+}
+
+void Radiation_edwards::calc_radiation_fluxes_dn_4(double* restrict flux_dn, double* restrict fl_dn_nr, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+{
+    const int ii  = 1;
+    const int jj  = grid->icells;
+    const int kk  = grid->ijcells;
+    const int ntot= grid->ncells;
+
+    const double tau_min = 1e-8; // Constant minimal optical depth
+    const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
+    const double diffus = 1.66; // Optical diffusivity (what is the actual name?)
+
+    for (int kr=0; kr<nlines; ++kr)
+    {
+        // Calculate radiative fluxes at boundaries
+        int ke = grid->kend;
+
+        for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+            for (int i=grid->istart; i<grid->iend; ++i)
+            {
+
+                const int ijk_top = i + j*jj + ke*kk;
+                const int ij      = i + j*jj;
+
+                // 1] Nog de exner-functie doorgeven voor absolute temperatuur
+                // 2] Mail v. John: nog niet geheel duidelijk voor mij hoe bijv. hogere emissiviteit oppervlak hierin is verwerkt
+
+                // Incoming radiation at top op domain
+                fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * interp4(temp[ijk_top-2*kk],temp[ijk_top-kk],temp[ijk_top],temp[ijk_top+kk]);
+            }
+
+        // 25/09/2017 : Er zijn flink wat indices veranderd om in lijn te komen met standaard. Ter verduidelijking:
+        // upward flux tussen 1ste en 2de echte gridcell wordt opgeslagen op positie kstart+1, MAAR
+        // vereist dus laagdikte en vochtgehalte van de laag eronder index = (k-1);
+        // de temperatuur op te berekenen interface: interpolatie k en k-1;
+        // en temperatuur op interface eronder: interpolatie k-1 en k-2 !
+
+        // 25/09/2017 : Er zijn in feite 2 manieren om dit te doen, je laat de loop bij k=kend beginnen
+        // en vervolgens bereken je de fluxen voor een niveau lager, of je begint bij kend-1, en berekent
+        // de fluxen voor dat niveau gebruikmakend van de temperaturen op zowel niveau hoger als niveau lager.
+        // Hier is voor de 1ste optie gekozen ook al loopt de loop dan wat anders,
+        // omdat zo de structuur binnenin de loops gelijk zijn aan de berekening van de upward fluxen.
+
         // Calculate downward fluxes
         for (int k=(grid->kend); k>(grid->kstart); --k) // Ga expliciet naar laagste level : deze zit dus op kstart
             for (int j=grid->jstart; j<grid->jend; ++j)
@@ -441,7 +532,7 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
 
                 }
 
-        // Sum upward and downward fluxes
+        // Sum downward fluxes
         for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elementen :P
             for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
@@ -449,26 +540,13 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double
                 {
                     const int ijk = i + j*jj + k*kk;
 
-                    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
                     flux_dn[ijk] += fl_dn_nr[ijk]; // Sum different radiation bands together
 
                 }
     }
-
-    // Just for current printing of total radiative fluxes
-    for (int k=grid->kstart; k<(grid->kend+1); ++k)
-        for (int j=grid->jstart; j<grid->jend; ++j)
-#pragma ivdep
-            for (int i=grid->istart; i<grid->iend; ++i)
-            {
-                const int ijk = i + j*jj + k*kk;
-                const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
-                std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
-            }
-
 }
 
-void Radiation_edwards::calc_radiation_tendency(double* restrict radtend, double* restrict dzh, double* restrict flux_up, double* restrict flux_dn, double* restrict QnT, double* restrict QnC)
+void Radiation_edwards::calc_radiation_tendency_up(double* restrict radtend, const double* restrict dzh, const double* restrict flux_up, double* restrict QnT, double* restrict QnC)
 {
     const int ii = 1;
     const int jj = grid->icells;
@@ -487,17 +565,51 @@ void Radiation_edwards::calc_radiation_tendency(double* restrict radtend, double
 
                 // Wat is eigenlijk de orde van deze berekening? Kan je over zoiets spreken bij straling
                 // Ik neem aan dat straling alleen gebruikt kan worden met dry en/of moist thermodynamics,
-                // als is mij nu niet geheel duidelijk wat dan anders is t.o.v. gebruik buyancy parameter
-                radtend[ijk] = - (flux_up[ijk+kk] - flux_dn[ijk+kk] + flux_dn[ijk] - flux_up[ijk]) / (Constants::cp * rho_air * dzh[k]); // Is dit juiste layer diepte? Is cp al gedefinieerd ergens?
+                // als is mij nu niet geheel duidelijk wat dan anders is t.o.v. gebruik bouyancy parameter
 
-                //if(model->timeloop->get_time()==0)
-                //{
-                //    std:printf("k=%d\tradt=%.10e\n", k, radtend[ijk]);
-                //}
+                // For efficiency: calculation of radiative tendencies is currently split for upward and downward fluxes.
+                // This function, therefore, overwrites (!) the radiative tendency from previous timesteps.
+
+                radtend[ijk] = - (flux_up[ijk+kk] - flux_up[ijk]) / (Constants::cp * rho_air * dzh[k]); // Is dit juiste layer diepte? Is cp al gedefinieerd ergens?
+
             }
 
     QnT = 0;
     QnC = 0;
+
+}
+
+void Radiation_edwards::calc_radiation_tendency_dn(double* restrict radtend, const double* restrict dzh, const double* restrict flux_dn, double* restrict QnT, double* restrict QnC)
+{
+    const int ii = 1;
+    const int jj = grid->icells;
+    const int kk = grid->ijcells;
+    const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
+
+    // Nog navragen/nadenken over hoe surface radiation mee te nemen. Deze moet meegegeven worden voor bepaling Robin-BC
+    // Include surface radiation
+
+    for (int k=grid->kstart; k<grid->kend; ++k)
+        for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+            for (int i=grid->istart; i<grid->iend; ++i)
+            {
+                const int ijk = i + j*jj + k*kk;
+
+                // Wat is eigenlijk de orde van deze berekening? Kan je over zoiets spreken bij straling
+                // Ik neem aan dat straling alleen gebruikt kan worden met dry en/of moist thermodynamics,
+                // als is mij nu niet geheel duidelijk wat dan anders is t.o.v. gebruik bouyancy parameter
+
+                // For efficiency: calculation of radiative tendencies is currently split for upward and downward fluxes.
+                // This function, therefore, increments (!) the radiative tendency calculated in the function above.
+                // Also pay special attention to plus & minus signs, switched with respect to function above (source and sink) of energy for current layer
+
+                radtend[ijk] += ( flux_dn[ijk+kk] - flux_dn[ijk]) / (Constants::cp * rho_air * dzh[k]); // Is dit juiste layer diepte? Is cp al gedefinieerd ergens?
+
+            }
+
+    QnT += 0;
+    QnC += 0;
 
 }
 
@@ -531,7 +643,7 @@ void Radiation_edwards::init_stat()
            std::stringstream ss;
            ss << n;
            std::string sn = ss.str();
-           stats->add_prof("radt"+sn, "Moment " +sn+" of the radiative tendence", "(K s-1)"+sn,"zh");
+           stats->add_prof("radt"+sn, "Moment " +sn+" of the radiative tendence", "(K s-1)"+sn,"z");
            }
            */
 
@@ -546,7 +658,7 @@ void Radiation_edwards::exec_stats(Mask *m)
     // define the location
     const int sloc[] = {0,0,0};
 
-    // calculate the mean : WELK TEMPORARY FIELD MOET HIER MEEGEGEVEN WORDEN??
+    // calculate the mean
     model->stats->calc_mean(m->profs["radt"].data, fields->sd["radt"]->data, NoOffset, sloc,
             fields->atmp["tmp3"]->data, model->stats->nmask);
 

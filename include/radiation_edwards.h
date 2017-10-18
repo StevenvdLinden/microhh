@@ -58,9 +58,12 @@ class Radiation_edwards: public Radiation
 
         void init_stat();
 
-        void calc_radiation_fluxes_2(double *, double *, const double *, const double *);
-        void calc_radiation_fluxes_4(double *, double *, const double *, const double *);
-        void calc_radiation_tendency(double *, double *, double *, double *, double *, double *);
+        void calc_radiation_fluxes_up_2(double *, double *, const double *, const double *);
+        void calc_radiation_fluxes_dn_2(double *, double *, const double *, const double *);
+        void calc_radiation_fluxes_up_4(double *, double *, const double *, const double *);
+        void calc_radiation_fluxes_dn_4(double *, double *, const double *, const double *);
+        void calc_radiation_tendency_up(double *, const double *, const double *, double *, double *);
+        void calc_radiation_tendency_dn(double *, const double *, const double *, double *, double *);
         void apply_radiation_tendency(double *, double *);
 
         Stats* stats;
