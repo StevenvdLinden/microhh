@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -77,8 +77,7 @@ Radiation_edwards::Radiation_edwards(Model* modelin, Input* inputin) : Radiation
     grid    = model->grid;
     fields  = model->fields;
     stats   = model->stats;
-    //timeloop= model->timeloop;
-
+   
     // obtain specific input parameters
     int nerror = 0;
     nerror += inputin->get_item(&nlines, "radiation", "nlines", "");
@@ -123,34 +122,33 @@ void Radiation_edwards::init()
 void Radiation_edwards::create(Input* inputin)
 {
 
-   std::string data_file;
+    std::string data_file;
 
-   int nerror = 0;
-   const int kstart = grid->kstart;
-   const int ktot = grid->ktot;
-   const int ntot = grid->ncells;
+    int nerror = 0;
+    const int kstart = grid->kstart;
+    const int ktot = grid->ktot;
+    const int ntot = grid->ncells;
 
-   nerror += inputin->get_prof(&q_bg.data()[kstart], "q_bg", ktot);
+    nerror += inputin->get_prof(&q_bg.data()[kstart], "q_bg", ktot);
 
-   nerror += inputin->get_prof(c0.data(), "c0", nlines);
-   nerror += inputin->get_prof(c1.data(), "c1", nlines);
-   nerror += inputin->get_prof(c2.data(), "c2", nlines);
-   nerror += inputin->get_prof(pl0.data(), "pl0", nlines);
-   nerror += inputin->get_prof(pl1.data(), "pl1", nlines);
-   nerror += inputin->get_prof(fdn_above_0.data(), "fdn_above_0", nlines);
-   nerror += inputin->get_prof(fdn_above_1.data(), "fdn_above_1", nlines);
+    nerror += inputin->get_prof(c0.data(), "c0", nlines);
+    nerror += inputin->get_prof(c1.data(), "c1", nlines);
+    nerror += inputin->get_prof(c2.data(), "c2", nlines);
+    nerror += inputin->get_prof(pl0.data(), "pl0", nlines);
+    nerror += inputin->get_prof(pl1.data(), "pl1", nlines);
+    nerror += inputin->get_prof(fdn_above_0.data(), "fdn_above_0", nlines);
+    nerror += inputin->get_prof(fdn_above_1.data(), "fdn_above_1", nlines);
 
-   if (nerror)
-       throw 1;
+    if (nerror)
+        throw 1;
 
-   // initialiseer statistiek functions
-   init_stat();
+    // initialiseer statistiek functions
+    init_stat();
 
 }
 
 void Radiation_edwards::exec()
 {
-
     int    iter;
     double time;
 
@@ -164,37 +162,21 @@ void Radiation_edwards::exec()
     // Still add start of simulation, check for time
     // Dit moet slimmer voor het geval de timestep adaptief wordt ingesteld
     //if ((iter % raditer) == 0 )
-    if (fmod(time,dtrad) == 0)
+    if (fmod(time, dtrad) == 0)
     {
-      // Het hier aanmaken van pointer, vervolgens memory toekennen
-      // en vervolgens vrij maken is waarschijnlijk niet de beste optie??
-      upflux = 0;
-      dnflux = 0;
+        double* upflux = fields->atmp["tmp1"]->data;
+        double* dnflux = fields->atmp["tmp2"]->data;
 
-      upflux = new double[grid->ncells];
-      dnflux = new double[grid->ncells];
+        if (grid->swspatialorder == "2")
+        {
+            calc_radiation_fluxes_2(upflux, dnflux, fields->sp["th"]->data, grid->dzh);
+        }
+        else if (grid->swspatialorder == "4")
+        {
+            calc_radiation_fluxes_4(upflux, dnflux, fields->sp["th"]->data, grid->dzh);
+        }
 
-      for( int l=0; l<grid->ncells; l++)
-      {
-        upflux[l] = 0.0;
-        dnflux[l] = 0.0;
-      }
-
-      if (grid->swspatialorder == "2")
-      {
-        calc_radiation_fluxes_2(fields->sp["th"]->data, grid->dzh, upflux, dnflux);
-      }
-      else if (grid->swspatialorder == "4")
-      {
-        calc_radiation_fluxes_4(fields->sp["th"]->data, grid->dzh, upflux, dnflux);
-      }
-
-      //calc_radiation_fluxes(fields->sp["th"]->data, grid->dzh, upflux, dnflux);
-      calc_radiation_tendency(fields->sd["radt"]->data, grid->dzh, upflux, dnflux, arbc, crbc);
-
-      delete[] upflux;
-      delete[] dnflux;
-
+        calc_radiation_tendency(fields->sd["radt"]->data, grid->dzh, upflux, dnflux, arbc, crbc);
     }
 
     // Apply the radiative tendencies to the (relevant) temperature tendencies.
@@ -204,7 +186,6 @@ void Radiation_edwards::exec()
     //    Surface temperatures yet to be implemented via boundary-functions and Robin BC!
 
     apply_radiation_tendency(fields->st["th"]->data,fields->sd["radt"]->data);
-
 }
 
 void Radiation_edwards::get_surface_radiation(Field3d* Qnet)
@@ -213,7 +194,7 @@ void Radiation_edwards::get_surface_radiation(Field3d* Qnet)
     throw 1;
 }
 
-void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* restrict dzh, double* restrict flux_up, double* restrict flux_dn) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+void Radiation_edwards::calc_radiation_fluxes_2(double* restrict flux_up, double* restrict flux_dn, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
 {
     const int ii  = 1;
     const int jj  = grid->icells;
@@ -224,7 +205,7 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* r
     const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
     const double diffus = 1.66; // Optical diffusivity (what is the actual name?)
 
-    double * Tbot = fields->sp["th"]->databot;
+    double* Tbot = fields->sp["th"]->databot;
 
     for (int kr=0; kr<nlines; ++kr)
     {
@@ -237,7 +218,6 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* r
 #pragma ivdep
             for (int i=grid->istart; i<grid->iend; ++i)
             {
-
                 const int ijk_bot = i + j*jj + kb*kk;
                 const int ijk_top = i + j*jj + ke*kk;
                 const int ij      = i + j*jj;
@@ -295,7 +275,7 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* r
         // Calculate downward fluxes
         for (int k=(grid->kend); k>(grid->kstart); --k) // Ga expliciet naar laagste level : deze zit dus op kstart
             for (int j=grid->jstart; j<grid->jend; ++j)
-//  #pragma ivdep
+                //  #pragma ivdep
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
@@ -324,7 +304,7 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* r
         // Sum upward and downward fluxes
         for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elementen :P
             for (int j=grid->jstart; j<grid->jend; ++j)
-  #pragma ivdep
+#pragma ivdep
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
@@ -335,22 +315,22 @@ void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* r
                 }
     }
 
-// Just for current printing of total radiative fluxes
+    // Just for current printing of total radiative fluxes
     for (int k=grid->kstart; k<(grid->kend+1); ++k)
         for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
             for (int i=grid->istart; i<grid->iend; ++i)
             {
-              const int ijk = i + j*jj + k*kk;
-              const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
-              //std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
-          }
+                const int ijk = i + j*jj + k*kk;
+                const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
+                //std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
+            }
 
 }
 
 // 25/09/2017 : Aan de 4de-orde implementatie wordt nog gewerkt
 
-void Radiation_edwards::calc_radiation_fluxes_4(double* restrict temp, double* restrict dzh, double* restrict flux_up, double* restrict flux_dn) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+void Radiation_edwards::calc_radiation_fluxes_4(double* restrict flux_up, double* restrict flux_dn, const double* restrict temp, const double* restrict dzh) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
 {
     const int ii  = 1;
     const int jj  = grid->icells;
@@ -365,9 +345,6 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict temp, double* r
 
     for (int kr=0; kr<nlines; ++kr)
     {
-
-        double fl_dn_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
-        double fl_up_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
 
         // Calculate radiative fluxes at boundaries
         int kb = grid->kstart;
@@ -435,7 +412,7 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict temp, double* r
         // Calculate downward fluxes
         for (int k=(grid->kend); k>(grid->kstart); --k) // Ga expliciet naar laagste level : deze zit dus op kstart
             for (int j=grid->jstart; j<grid->jend; ++j)
-  #pragma ivdep
+#pragma ivdep
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
@@ -461,7 +438,7 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict temp, double* r
         // Sum upward and downward fluxes
         for (int k=grid->kstart; k<(grid->kend+1); ++k) // Check, kstart=1, kend+1=34 --> 33 elementen :P
             for (int j=grid->jstart; j<grid->jend; ++j)
-  #pragma ivdep
+#pragma ivdep
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
@@ -472,16 +449,16 @@ void Radiation_edwards::calc_radiation_fluxes_4(double* restrict temp, double* r
                 }
     }
 
-// Just for current printing of total radiative fluxes
+    // Just for current printing of total radiative fluxes
     for (int k=grid->kstart; k<(grid->kend+1); ++k)
         for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
             for (int i=grid->istart; i<grid->iend; ++i)
             {
-              const int ijk = i + j*jj + k*kk;
-              const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
-              std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
-          }
+                const int ijk = i + j*jj + k*kk;
+                const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
+                std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
+            }
 
 }
 
@@ -513,26 +490,26 @@ void Radiation_edwards::calc_radiation_tendency(double* restrict radtend, double
                 //}
             }
 
-            QnT = 0;
-            QnC = 0;
+    QnT = 0;
+    QnC = 0;
 
 }
 
 void Radiation_edwards::apply_radiation_tendency(double* restrict tempt, double *restrict radt)
 {
-  const int ii = 1;
-  const int jj = grid->icells;
-  const int kk = grid->ijcells;
+    const int ii = 1;
+    const int jj = grid->icells;
+    const int kk = grid->ijcells;
 
-  for (int k=grid->kstart; k<grid->kend; ++k)
-      for (int j=grid->jstart; j<grid->jend; ++j)
+    for (int k=grid->kstart; k<grid->kend; ++k)
+        for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
-          for (int i=grid->istart; i<grid->iend; ++i)
-          {
-              const int ijk = i + j*jj + k*kk;
+            for (int i=grid->istart; i<grid->iend; ++i)
+            {
+                const int ijk = i + j*jj + k*kk;
 
-              tempt[ijk] += radt[ijk];
-          }
+                tempt[ijk] += radt[ijk];
+            }
 
 }
 
@@ -543,14 +520,14 @@ void Radiation_edwards::init_stat()
     {
         model->stats->add_prof("radt", "Radiative tendency", "K s-1", "z");
         /* // Higher moments currently not needed?
-        for (int n=2; n<5; ++n)
-        {
-            std::stringstream ss;
-            ss << n;
-            std::string sn = ss.str();
-            stats->add_prof("radt"+sn, "Moment " +sn+" of the radiative tendence", "(K s-1)"+sn,"zh");
-        }
-        */
+           for (int n=2; n<5; ++n)
+           {
+           std::stringstream ss;
+           ss << n;
+           std::string sn = ss.str();
+           stats->add_prof("radt"+sn, "Moment " +sn+" of the radiative tendence", "(K s-1)"+sn,"zh");
+           }
+           */
 
     }
 }
@@ -565,163 +542,163 @@ void Radiation_edwards::exec_stats(Mask *m)
 
     // calculate the mean : WELK TEMPORARY FIELD MOET HIER MEEGEGEVEN WORDEN??
     model->stats->calc_mean(m->profs["radt"].data, fields->sd["radt"]->data, NoOffset, sloc,
-                     fields->atmp["tmp3"]->data, model->stats->nmask);
+            fields->atmp["tmp3"]->data, model->stats->nmask);
 
     /*
     // calculate the moments
     for (int n=2; n<5; ++n)
     {
-        std::stringstream ss;
-        ss << n;
-        std::string sn = ss.str();
-        stats->calc_moment(fields->atmp["tmp1"]->data, m->profs["radt"].data, m->profs["radt"+sn].data, n, sloc,
-            fields->atmp["tmp3"]->data, stats->nmask);
+    std::stringstream ss;
+    ss << n;
+    std::string sn = ss.str();
+    stats->calc_moment(fields->atmp["tmp1"]->data, m->profs["radt"].data, m->profs["radt"+sn].data, n, sloc,
+    fields->atmp["tmp3"]->data, stats->nmask);
     }
     */
 
 }
 
 /*
-void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* restrict dzh, double* restrict flux_up, double* restrict flux_dn) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+   void Radiation_edwards::calc_radiation_fluxes_2(double* restrict temp, double* restrict dzh, double* restrict flux_up, double* restrict flux_dn) // totale upward and downward fluxen als argument meegeven, waar initialisatie?
+   {
+   const int ii  = 1;
+   const int jj  = grid->icells;
+   const int kk  = grid->ijcells;
+   const int ntot= grid->ncells;
+
+   const double tau_min = 1e-8; // Constant minimal optical depth
+   const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
+   const double diffus = 1.66; // Optical diffusivity (what is the actual name?)
+
+   double * Tbot = fields->sp["th"]->databot;
+
+   for (int kr=0; kr<nlines; ++kr)
+   {
+
+   double fl_dn_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
+   double fl_up_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
+
+// Behandel surface en inkomend aan de top hier apart, kstart stelt surface voor, en kend absolute top??
+int kb = grid->kstart-1;
+int ke = grid->kend-1; // 17 Sept: laatste flux zou in
+
+for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+for (int i=grid->istart; i<grid->iend; ++i)
 {
-    const int ii  = 1;
-    const int jj  = grid->icells;
-    const int kk  = grid->ijcells;
-    const int ntot= grid->ncells;
 
-    const double tau_min = 1e-8; // Constant minimal optical depth
-    const double rho_air = 1.15; // Air density for radiation --> specific per case, ask John? Or use diagnosed 'real' density?
-    const double diffus = 1.66; // Optical diffusivity (what is the actual name?)
+// 29 augustus 2017: in deze indices zitten hoogstwaarschijnlijk de fouten, en worden de juist waardes dus niet aangeroepen!
 
-    double * Tbot = fields->sp["th"]->databot;
+const int ijk_bot = i + j*jj + kb*kk; // Is dit good coding practice ?
+const int ijk_top = i + j*jj + ke*kk; // idem ?
+const int ij      = i + j*jj;
 
-    for (int kr=0; kr<nlines; ++kr)
+// VRAGEN aan John: waarom is de straling aan het aardoppervlak ook afhankelijk van banden? En waarom geen standaard Boltzmann?
+// Outgoing radiation at the surface
+// HIER EVEN expliciet index ij geplaats!! 25 augustus 2017
+// KLOPT Tbot[ij] hier? : is dit inderdaad de juiste temperatuur?
+fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * Tbot[ij]; //temp[ijk_bot]; // Insert absolute surface temperatuur hier
+
+// Incoming radiation at top op domain
+fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * temp[ijk_top]; // Insert absolute temperature top of domain
+}
+
+// Calculate upward fluxes ; hier de resterende lagen
+for (int k=grid->kstart; k<grid->kend; ++k) // REMOVED THE +1: kstart is first level ABOVE surface?? CHECK, 25 Aug 2017
+for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+for (int i=grid->istart; i<grid->iend; ++i)
+{
+const int ijk = i + j*jj + k*kk;
+const int ij  = i + j*jj;
+
+double tau = tau_min; // (Re)-Initialize tau, Overal moet toch tau_min bij opgeteld worden --> daarom in initialisatie
+double trans = 0; // (Re)-Initialize transmissivity
+double bbt = 0, bbb = 0; // (Re)-Initialize Planckian values
+
+// Calculate new optical depth transmissivity
+tau += ( c0[kr] + q_bg[k] * (c1[kr] + c2[kr] * q_bg[k]) ) * dzh[k] * rho_air;
+trans = std::exp(-diffus * tau);
+
+if(k==grid->kstart)
+{
+// Planckian functions at top and bottom of air layers
+bbt = pl0[kr] + pl1[kr] * temp[ijk]; //+ interp2(temp[ijk],temp[ijk+kk]) ofzoiets? // Insert absolute temperature here at top of cell
+bbb = pl0[kr] + pl1[kr] * Tbot[ij]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
+}
+else
+{
+// Planckian functions at top and bottom of air layers
+bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
+bbb = pl0[kr] + pl1[kr] * temp[ijk-kk]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
+}
+
+// Increment total upward flux with upward flux for current radiation band
+fl_up_nr[ijk] = bbt + trans * (fl_up_nr[ijk-kk] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
+
+}
+
+// Calculate downward fluxes
+for (int k=(grid->kend-1); k>(grid->kstart-1); --k) // GA EXPLICIET NAAR DIT LAAGSTE LEVEL // Move down through the layer, stop at last level above the surface == ksart+1??
+for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+for (int i=grid->istart; i<grid->iend; ++i)
+{
+
+    const int ijk = i + j*jj + k*kk;
+    const int ij  = i + j*jj;
+
+    double tau = tau_min; // (Re)-Initialize tau, Overal moet toch tau_min bij opgeteld worden --> daarom in initialisatie
+    double trans = 0; // (Re)-Initialize transmissivity
+    double bbt = 0, bbb = 0; // (Re)-Initialize Planckian values
+
+    // Calculate new optical depth transmissivity
+    tau += ( c0[kr] + q_bg[k] * (c1[kr] + c2[kr] * q_bg[k]) ) * dzh[k] * rho_air;
+    trans = std::exp(-diffus * tau);
+
+    if(k==grid->kstart)
     {
-
-        double fl_dn_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
-        double fl_up_nr[grid->ncells] ; // (Re)-Initialize flux fields for current radiation band
-
-        // Behandel surface en inkomend aan de top hier apart, kstart stelt surface voor, en kend absolute top??
-        int kb = grid->kstart-1;
-        int ke = grid->kend-1; // 17 Sept: laatste flux zou in
-
-        for (int j=grid->jstart; j<grid->jend; ++j)
-#pragma ivdep
-            for (int i=grid->istart; i<grid->iend; ++i)
-            {
-
-                // 29 augustus 2017: in deze indices zitten hoogstwaarschijnlijk de fouten, en worden de juist waardes dus niet aangeroepen!
-
-                const int ijk_bot = i + j*jj + kb*kk; // Is dit good coding practice ?
-                const int ijk_top = i + j*jj + ke*kk; // idem ?
-                const int ij      = i + j*jj;
-
-                // VRAGEN aan John: waarom is de straling aan het aardoppervlak ook afhankelijk van banden? En waarom geen standaard Boltzmann?
-                // Outgoing radiation at the surface
-                // HIER EVEN expliciet index ij geplaats!! 25 augustus 2017
-                // KLOPT Tbot[ij] hier? : is dit inderdaad de juiste temperatuur?
-                fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * Tbot[ij]; //temp[ijk_bot]; // Insert absolute surface temperatuur hier
-
-                // Incoming radiation at top op domain
-                fl_dn_nr[ijk_top] = fdn_above_0[kr] + fdn_above_1[kr] * temp[ijk_top]; // Insert absolute temperature top of domain
-            }
-
-        // Calculate upward fluxes ; hier de resterende lagen
-        for (int k=grid->kstart; k<grid->kend; ++k) // REMOVED THE +1: kstart is first level ABOVE surface?? CHECK, 25 Aug 2017
-            for (int j=grid->jstart; j<grid->jend; ++j)
-#pragma ivdep
-                for (int i=grid->istart; i<grid->iend; ++i)
-                {
-                    const int ijk = i + j*jj + k*kk;
-                    const int ij  = i + j*jj;
-
-                    double tau = tau_min; // (Re)-Initialize tau, Overal moet toch tau_min bij opgeteld worden --> daarom in initialisatie
-                    double trans = 0; // (Re)-Initialize transmissivity
-                    double bbt = 0, bbb = 0; // (Re)-Initialize Planckian values
-
-                    // Calculate new optical depth transmissivity
-                    tau += ( c0[kr] + q_bg[k] * (c1[kr] + c2[kr] * q_bg[k]) ) * dzh[k] * rho_air;
-                    trans = std::exp(-diffus * tau);
-
-                    if(k==grid->kstart)
-                    {
-                        // Planckian functions at top and bottom of air layers
-                        bbt = pl0[kr] + pl1[kr] * temp[ijk]; //+ interp2(temp[ijk],temp[ijk+kk]) ofzoiets? // Insert absolute temperature here at top of cell
-                        bbb = pl0[kr] + pl1[kr] * Tbot[ij]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
-                    }
-                    else
-                    {
-                        // Planckian functions at top and bottom of air layers
-                        bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
-                        bbb = pl0[kr] + pl1[kr] * temp[ijk-kk]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
-                    }
-
-                    // Increment total upward flux with upward flux for current radiation band
-                    fl_up_nr[ijk] = bbt + trans * (fl_up_nr[ijk-kk] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
-
-                }
-
-        // Calculate downward fluxes
-        for (int k=(grid->kend-1); k>(grid->kstart-1); --k) // GA EXPLICIET NAAR DIT LAAGSTE LEVEL // Move down through the layer, stop at last level above the surface == ksart+1??
-            for (int j=grid->jstart; j<grid->jend; ++j)
-  #pragma ivdep
-                for (int i=grid->istart; i<grid->iend; ++i)
-                {
-
-                    const int ijk = i + j*jj + k*kk;
-                    const int ij  = i + j*jj;
-
-                    double tau = tau_min; // (Re)-Initialize tau, Overal moet toch tau_min bij opgeteld worden --> daarom in initialisatie
-                    double trans = 0; // (Re)-Initialize transmissivity
-                    double bbt = 0, bbb = 0; // (Re)-Initialize Planckian values
-
-                    // Calculate new optical depth transmissivity
-                    tau += ( c0[kr] + q_bg[k] * (c1[kr] + c2[kr] * q_bg[k]) ) * dzh[k] * rho_air;
-                    trans = std::exp(-diffus * tau);
-
-                    if(k==grid->kstart)
-                    {
-                        // Planckian functions at top and bottom of air layers
-                        bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
-                        bbb = pl0[kr] + pl1[kr] * Tbot[ij]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
-                    }
-                    else
-                    {
-                        // Planckian functions at top and bottom of air layers
-                        bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
-                        bbb = pl0[kr] + pl1[kr] * temp[ijk-kk]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
-                    }
-
-                    // Increment total upward flux with upward flux for current radiation band
-                    fl_dn_nr[ijk-kk] = bbb + trans * (fl_dn_nr[ijk] - bbt) - (bbb - bbt) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
-
-                }
-
-        // Sum upward and downward fluxes
-        for (int k=grid->kstart-1; k<grid->kend; ++k)
-            for (int j=grid->jstart; j<grid->jend; ++j)
-  #pragma ivdep
-                for (int i=grid->istart; i<grid->iend; ++i)
-                {
-                    const int ijk = i + j*jj + k*kk;
-
-                    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
-                    flux_dn[ijk] += fl_dn_nr[ijk]; // Sum different radiation bands together
-
-                }
+        // Planckian functions at top and bottom of air layers
+        bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
+        bbb = pl0[kr] + pl1[kr] * Tbot[ij]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
     }
+    else
+    {
+        // Planckian functions at top and bottom of air layers
+        bbt = pl0[kr] + pl1[kr] * temp[ijk]; // Insert absolute temperature here at top of cell
+        bbb = pl0[kr] + pl1[kr] * temp[ijk-kk]; // Wat is index voor 1 positie lager; kk toch? Insert absolute temperature here at bottom of cell
+    }
+
+    // Increment total upward flux with upward flux for current radiation band
+    fl_dn_nr[ijk-kk] = bbb + trans * (fl_dn_nr[ijk] - bbt) - (bbb - bbt) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
+
+}
+
+// Sum upward and downward fluxes
+for (int k=grid->kstart-1; k<grid->kend; ++k)
+for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+for (int i=grid->istart; i<grid->iend; ++i)
+{
+    const int ijk = i + j*jj + k*kk;
+
+    flux_up[ijk] += fl_up_nr[ijk]; // Sum different radiation bands together
+    flux_dn[ijk] += fl_dn_nr[ijk]; // Sum different radiation bands together
+
+}
+}
 
 
 // JUST FOR PRINTING FINAL ADDED RAD_FLUXES
-    for (int k=grid->kstart-1; k<grid->kend; ++k) // Note: counter starting at kstart (= suface?)
-        for (int j=grid->jstart; j<grid->jend; ++j)
+for (int k=grid->kstart-1; k<grid->kend; ++k) // Note: counter starting at kstart (= suface?)
+for (int j=grid->jstart; j<grid->jend; ++j)
 #pragma ivdep
-            for (int i=grid->istart; i<grid->iend; ++i)
-            {
-              const int ijk = i + j*jj + k*kk;
-              const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
-            std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
-          }
+for (int i=grid->istart; i<grid->iend; ++i)
+{
+    const int ijk = i + j*jj + k*kk;
+    const int ijk_top = i + j*jj + (grid->kend)*kk; // idem ?
+    std::printf("i=%d, j=%d, k=%d, ijk=%d ,rad_fluxes =\t%.14f\t%.14f\n",i,j,k,ijk,flux_up[ijk],flux_dn[ijk]);
+}
 
 }
 */

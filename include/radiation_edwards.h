@@ -52,18 +52,14 @@ class Radiation_edwards: public Radiation
         void exec_stats(Mask*);
 
     private:
-        double* upflux;
-        double* dnflux;
-
         // Move to boundary_lsm.h later?
         double* arbc;
         double* crbc;
 
         void init_stat();
 
-        void calc_radiation_fluxes_2(double *, double *, double *, double *);
-        void calc_radiation_fluxes_4(double *, double *, double *, double *);
-        //void calc_radiation_fluxes(double *, double *, double *, double *);
+        void calc_radiation_fluxes_2(double *, double *, const double *, const double *);
+        void calc_radiation_fluxes_4(double *, double *, const double *, const double *);
         void calc_radiation_tendency(double *, double *, double *, double *, double *, double *);
         void apply_radiation_tendency(double *, double *);
 
