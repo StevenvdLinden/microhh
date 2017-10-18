@@ -27,6 +27,9 @@
 
 class Model;
 class Input;
+class Fields;
+class Stats;
+class Grid;
 
 /**
  * Derived class for a disabled radiation scheme
@@ -35,12 +38,36 @@ class Radiation_edwards: public Radiation
 {
     public:
         Radiation_edwards(Model*, Input*); ///< Constructor of the radiation class.
-        ~Radiation_edwards();              ///< Destructor of the radiation class.
+        virtual ~Radiation_edwards();              ///< Destructor of the radiation class.
 
         void init();
         void create(Input*);
         void exec(); ///< Execute the radiation scheme.
 
         void get_surface_radiation(Field3d*);
+
+        // Empty functions that are allowed to pass.
+        void get_mask(Field3d*, Field3d*, Mask*) {}
+
+        void exec_stats(Mask*);
+
+    private:
+        double* upflux;
+        double* dnflux;
+
+        // Move to boundary_lsm.h later?
+        double* arbc;
+        double* crbc;
+
+        void init_stat();
+
+        void calc_radiation_fluxes_2(double *, double *, double *, double *);
+        void calc_radiation_fluxes_4(double *, double *, double *, double *);
+        //void calc_radiation_fluxes(double *, double *, double *, double *);
+        void calc_radiation_tendency(double *, double *, double *, double *, double *, double *);
+        void apply_radiation_tendency(double *, double *);
+
+        Stats* stats;
+
 };
 #endif

@@ -29,6 +29,9 @@ class Master;
 class Input;
 class Model;
 class Field3d;
+class Fields;
+class Grid;
+struct Mask;
 
 /**
  * Base class for the radiation scheme. This class is abstract and only
@@ -40,9 +43,7 @@ class Radiation
     public:
         Radiation(Model*, Input*); ///< Constructor of the radiation class.
         virtual ~Radiation();      ///< Destructor of the radiation class.
-
         static Radiation* factory(Master*, Input*, Model*); ///< Factory function for radiation class generation.
-
         std::string get_switch();
 
         // Pure virtual functions that have to be implemented in derived class.
@@ -53,9 +54,15 @@ class Radiation
         // Get en set interfaces
         virtual void get_surface_radiation(Field3d*) = 0;
 
+        // Empty functions that are allowed to pass.
+        virtual void get_mask(Field3d*, Field3d*, Mask*) = 0;
+        virtual void exec_stats(Mask*) = 0;
+
     protected:
         Master* master; ///< Pointer to master class.
         Model*  model;  ///< Pointer to model class.
+        Grid*   grid;   ///< Pointer to grid class.
+        Fields* fields; ///< Pointer to fields class.
 
         std::string swradiation;
 };

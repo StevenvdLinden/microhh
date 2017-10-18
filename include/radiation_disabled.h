@@ -41,6 +41,11 @@ class Radiation_disabled : public Radiation
         void create(Input*);
         void exec(); ///< Execute the radiation scheme.
 
-        void get_surface_radiation(Field3d*);
+        void get_surface_radiation(Field3d*);\
+        
+        // Empty functions that are allowed to pass.
+        void get_mask(Field3d*, Field3d*, Mask*) {}
+
+        void exec_stats(Mask*);
 };
 #endif

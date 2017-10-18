@@ -24,6 +24,7 @@
 #include "master.h"
 #include "model.h"
 #include "field3d.h"
+#include "radiation.h"
 #include "radiation_disabled.h"
 
 Radiation_disabled::Radiation_disabled(Model* modelin, Input* inputin) : Radiation(modelin, inputin)
@@ -51,4 +52,8 @@ void Radiation_disabled::get_surface_radiation(Field3d* Qnet)
 {
     master->print_error("Radiation_disabled can not provide surface radiation\n");
     throw 1;
+}
+
+void Radiation_disabled::exec_stats(Mask *m)
+{
 }

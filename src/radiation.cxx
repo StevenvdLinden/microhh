@@ -25,6 +25,8 @@
 #include <algorithm>
 #include "master.h"
 #include "model.h"
+#include "grid.h"
+#include "fields.h"
 
 #include "radiation.h"
 #include "radiation_disabled.h"
@@ -33,6 +35,8 @@
 Radiation::Radiation(Model* modelin, Input* inputin)
 {
     model  = modelin;
+    grid   = model->grid;
+    fields = model->fields;
     master = model->master;
 
     swradiation = "0";
