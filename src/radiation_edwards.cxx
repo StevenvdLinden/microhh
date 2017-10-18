@@ -167,6 +167,12 @@ void Radiation_edwards::exec()
         double* upflux = fields->atmp["tmp1"]->data;
         double* dnflux = fields->atmp["tmp2"]->data;
 
+        for (int n=0; n<grid->ncells; ++n)
+        {
+            upflux[n] = 0;
+            dnflux[n] = 0;
+        }
+
         if (grid->swspatialorder == "2")
         {
             calc_radiation_fluxes_2(upflux, dnflux, fields->sp["th"]->data, grid->dzh);
