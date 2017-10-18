@@ -63,7 +63,7 @@ Model::Model(Master *masterin, Input *inputin)
     force     = 0;
     buffer    = 0;
     thermo    = 0;
-    radiation = 0 ;
+    radiation = 0;
 
     stats  = 0;
     cross  = 0;
@@ -202,7 +202,6 @@ void Model::load()
     force ->create(input);
     thermo->create(input);
     radiation->create(input);
-
     budget->create();
 
     // End with those modules that require all fields to be loaded.
@@ -237,7 +236,7 @@ void Model::exec()
     diff    ->prepare_device();
     force   ->prepare_device();
     // Prepare pressure last, for memory check
-    pres    ->prepare_device(); 
+    pres    ->prepare_device();
     #endif
 
     master->print_message("Starting time integration\n");
@@ -440,10 +439,11 @@ void Model::set_time_step()
 // Calculate the statistics for all classes that have a statistics function.
 void Model::calc_stats(std::string maskname)
 {
-    fields  ->exec_stats(&stats->masks[maskname]);
-    thermo  ->exec_stats(&stats->masks[maskname]);
-    budget  ->exec_stats(&stats->masks[maskname]);
-    boundary->exec_stats(&stats->masks[maskname]);
+    fields   ->exec_stats(&stats->masks[maskname]);
+    thermo   ->exec_stats(&stats->masks[maskname]);
+    budget   ->exec_stats(&stats->masks[maskname]);
+    boundary ->exec_stats(&stats->masks[maskname]);
+    radiation->exec_stats(&stats->masks[maskname]);
 }
 
 // Print the status information to the .out file.
