@@ -36,7 +36,7 @@ Radiation_disabled::~Radiation_disabled()
 {
 }
 
-void Radiation_disabled::init()
+void Radiation_disabled::init(double ifactor)
 {
 }
 

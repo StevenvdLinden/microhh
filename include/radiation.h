@@ -47,9 +47,10 @@ class Radiation
         std::string get_switch();
 
         // Pure virtual functions that have to be implemented in derived class.
-        virtual void init() = 0;   ///< Initialize the radiation scheme.
+        virtual void init(double) = 0;   ///< Initialize the radiation scheme.
         virtual void create(Input*) = 0; ///< Create the data fields.
         virtual void exec() = 0;   ///< Execute the radiation scheme
+        virtual unsigned long get_time_limit(unsigned long) = 0; ///< Get the maximum time step imposed by advection scheme
 
         // Get en set interfaces
         virtual void get_surface_radiation(Field3d*) = 0;

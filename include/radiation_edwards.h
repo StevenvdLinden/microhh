@@ -40,9 +40,10 @@ class Radiation_edwards: public Radiation
         Radiation_edwards(Model*, Input*); ///< Constructor of the radiation class.
         virtual ~Radiation_edwards();              ///< Destructor of the radiation class.
 
-        void init();
+        void init(double);
         void create(Input*);
         void exec(); ///< Execute the radiation scheme.
+        unsigned long get_time_limit(unsigned long); ///< Get the limit on the time step imposed by the radiation scheme.
 
         void get_surface_radiation(Field3d*);
 

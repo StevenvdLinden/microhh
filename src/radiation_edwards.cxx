@@ -51,7 +51,9 @@ namespace
 {
     int nlines;
     int raditer;
-    double dtrad;
+    double dtrad; // sample time for radiation : best placement here, or in header files?
+    unsigned long idtrad; // integer sample time for radiation : best placement here, or in header files?
+
     std::vector<double> q_bg;
 
     std::vector<double> c0;
@@ -94,7 +96,7 @@ Radiation_edwards::~Radiation_edwards()
 {
 }
 
-void Radiation_edwards::init()
+void Radiation_edwards::init(double ifactor)
 {
 
     // container for background absolute humidity
@@ -108,6 +110,9 @@ void Radiation_edwards::init()
     pl1.resize(nlines);
     fdn_above_0.resize(nlines);
     fdn_above_1.resize(nlines);
+
+    // specific integer sample time for radiation
+    idtrad = (unsigned long)(ifactor * dtrad);
 }
 
 void Radiation_edwards::create(Input* inputin)
@@ -138,17 +143,21 @@ void Radiation_edwards::create(Input* inputin)
 
 }
 
+unsigned long Radiation_edwards::get_time_limit(unsigned long itime)
+{
+    if (swradiation == "0")
+        return Constants::ulhuge;
+
+    unsigned long idtlim = idtrad - itime % idtrad;
+
+    return idtlim;
+}
+
 void Radiation_edwards::exec()
 {
-    int    iter;
-    double time;
 
-    // get current iteration and time
-    iter = model->timeloop->get_iteration();
-    time = model->timeloop->get_time();
-
-    // to be done: (1) enforce proper timestep (for update interval), (2) check use of fmod !
-    if (fmod(time, dtrad) == 0)
+    // check that if-statement below is correctly implemented, in combination with
+    if (model->timeloop->get_itime() % idtrad == 0 )
     {
         // pointers to temporary fields
         double* upflux   = fields->atmp["tmp1"]->data;
