@@ -26,6 +26,7 @@
 #include "field3d.h"
 #include "radiation.h"
 #include "radiation_disabled.h"
+#include "constants.h"
 
 Radiation_disabled::Radiation_disabled(Model* modelin, Input* inputin) : Radiation(modelin, inputin)
 {
@@ -42,6 +43,11 @@ void Radiation_disabled::init(double ifactor)
 
 void Radiation_disabled::create(Input* inputin)
 {
+}
+
+unsigned long Radiation_disabled::get_time_limit(unsigned long itime)
+{
+  return Constants::ulhuge;
 }
 
 void Radiation_disabled::exec()

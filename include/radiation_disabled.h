@@ -40,8 +40,9 @@ class Radiation_disabled : public Radiation
         void init(double);
         void create(Input*);
         void exec(); ///< Execute the radiation scheme.
+        unsigned long get_time_limit(unsigned long); ///< Get the limit on the time step imposed by the radiation scheme.
 
-        void get_surface_radiation(Field3d*);\
+        void get_surface_radiation(Field3d*);
 
         // Empty functions that are allowed to pass.
         void get_mask(Field3d*, Field3d*, Mask*) {}

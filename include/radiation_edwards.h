@@ -38,7 +38,7 @@ class Radiation_edwards: public Radiation
 {
     public:
         Radiation_edwards(Model*, Input*); ///< Constructor of the radiation class.
-        virtual ~Radiation_edwards();              ///< Destructor of the radiation class.
+        virtual ~Radiation_edwards();      ///< Destructor of the radiation class.
 
         void init(double);
         void create(Input*);
