@@ -122,12 +122,12 @@ void Thermo_dry::init()
     exnrefh = new double[grid->kcells];
 
     init_cross();
-    init_dump(); 
+    init_dump();
 }
 
 void Thermo_dry::create(Input *inputin)
 {
-    /* Setup base state: 
+    /* Setup base state:
        For anelastic setup, calculate reference density and temperature from input sounding
        For boussinesq, reference density and temperature are fixed */
     if (swbasestate == "anelastic")
@@ -248,8 +248,8 @@ void Thermo_dry::exec_cross()
     // With one additional temp field, we wouldn't have to re-calculate the ql or b field for simple,lngrad,path, etc.
     for (std::vector<std::string>::iterator it=crosslist.begin(); it<crosslist.end(); ++it)
     {
-        /* BvS: for now, don't call getThermoField() or getBuoyancySurf(), but directly the function itself. With CUDA enabled, 
-           statistics etc. is done on the host, while getThermoField() is executed on the GPU */ 
+        /* BvS: for now, don't call getThermoField() or getBuoyancySurf(), but directly the function itself. With CUDA enabled,
+           statistics etc. is done on the host, while getThermoField() is executed on the GPU */
 
         if (*it == "b")
         {
@@ -285,7 +285,7 @@ void Thermo_dry::exec_dump()
 {
     for (std::vector<std::string>::const_iterator it=dumplist.begin(); it<dumplist.end(); ++it)
     {
-        // TODO BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant... 
+        // TODO BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
         if (*it == "b")
             calc_buoyancy(fields->atmp["tmp2"]->data, fields->sp["th"]->data, thref);
         else
@@ -310,6 +310,8 @@ void Thermo_dry::get_thermo_field(Field3d *fld, Field3d *tmp, std::string name, 
         calc_buoyancy(fld->data, fields->sp["th"]->data, thref);
     else if (name == "N2")
         calc_N2(fld->data, fields->sp["th"]->data, grid->dzi, thref);
+    else if (name == "T_abs")
+        calc_absolute_temperature(fld->data, fields->sp["th"]->data, exnref);
     else
         throw 1;
 
@@ -342,7 +344,7 @@ void Thermo_dry::get_prog_vars(std::vector<std::string>* list)
 double Thermo_dry::get_buoyancy_diffusivity()
 {
     // Use the diffusivity from theta
-    return fields->sp["th"]->visc; 
+    return fields->sp["th"]->visc;
 }
 
 void Thermo_dry::calc_buoyancy(double* restrict b, double* restrict th, double* restrict thref)
@@ -372,6 +374,21 @@ void Thermo_dry::calc_N2(double* restrict N2, double* restrict th, double* restr
             {
                 const int ijk = i + j*jj + k*kk;
                 N2[ijk] = grav/thref[k]*0.5*(th[ijk+kk] - th[ijk-kk])*dzi[k];
+            }
+}
+
+void Thermo_dry::calc_absolute_temperature(double* restrict T_abs, const double* restrict th, const double* restrict exner)
+{
+    const int jj = grid->icells;
+    const int kk = grid->ijcells;
+
+    for (int k=grid->kstart; k<grid->kend; ++k)
+        for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+            for (int i=grid->istart; i<grid->iend; ++i)
+            {
+                const int ijk = i + j*jj + k*kk;
+                T_abs[ijk] = th[ijk] * exner[k];
             }
 }
 
@@ -511,7 +528,7 @@ void Thermo_dry::init_stat()
 
         stats->add_prof("bgrad", "Gradient of the buoyancy", "s-2", "zh");
         stats->add_prof("bw"   , "Turbulent flux of the buoyancy", "m2 s-3", "zh");
-        stats->add_prof("bdiff", "usive flux of the buoyancy", "m2 s-3", "zh");
+        stats->add_prof("bdiff", "Diffusive flux of the buoyancy", "m2 s-3", "zh");
         stats->add_prof("bflux", "Total flux of the buoyancy", "m2 s-3", "zh");
 
         stats->add_prof("bsort", "Sorted buoyancy", "m s-2", "z");
@@ -530,7 +547,7 @@ void Thermo_dry::init_cross()
             allowedcrossvars.push_back("blngrad");
 
         // Get global cross-list from cross.cxx
-        std::vector<std::string> *crosslist_global = model->cross->get_crosslist(); 
+        std::vector<std::string> *crosslist_global = model->cross->get_crosslist();
 
         // Check input list of cross variables (crosslist)
         std::vector<std::string>::iterator it=crosslist_global->begin();
@@ -556,7 +573,7 @@ void Thermo_dry::init_dump()
     if (model->dump->get_switch() == "1")
     {
         // Get global cross-list from cross.cxx
-        std::vector<std::string>* dumplist_global = model->dump->get_dumplist(); 
+        std::vector<std::string>* dumplist_global = model->dump->get_dumplist();
 
         // Check if fields in dumplist are retrievable thermo fields
         std::vector<std::string>::iterator dumpvar=dumplist_global->begin();

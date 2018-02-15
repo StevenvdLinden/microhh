@@ -38,6 +38,7 @@
 #include "boundary_surface_bulk.h"
 #include "boundary_surface_patch.h"
 #include "boundary_patch.h"
+//#include "boundary_lsm.h"
 
 Boundary::Boundary(Model* modelin, Input* inputin)
 {
@@ -187,7 +188,7 @@ void Boundary::process_time_dependent(Input* inputin)
         for (FieldMap::const_iterator it=fields->sp.begin(); it!=fields->sp.end(); ++it)
         {
             std::string name = "sbot[" + it->first + "]";
-            if (std::find(timedeplist.begin(), timedeplist.end(), name) != timedeplist.end()) 
+            if (std::find(timedeplist.begin(), timedeplist.end(), name) != timedeplist.end())
             {
                 nerror += inputin->get_time(&timedepdata[name], &timedeptime, name);
 
@@ -198,7 +199,7 @@ void Boundary::process_time_dependent(Input* inputin)
             }
         }
 
-        // display a warning for the non-supported 
+        // display a warning for the non-supported
         for (std::vector<std::string>::const_iterator ittmp=tmplist.begin(); ittmp!=tmplist.end(); ++ittmp)
             master->print_warning("%s is not supported (yet) as a time dependent parameter\n", ittmp->c_str());
     }
@@ -471,6 +472,8 @@ Boundary* Boundary::factory(Master* masterin, Input* inputin, Model* modelin)
         return new Boundary_surface_patch(modelin, inputin);
     else if (swboundary == "patch")
         return new Boundary_patch(modelin, inputin);
+  //  else if (swboundary == "patch")
+  //      return new Boundary_lsm(modelin, inputin);
     else if (swboundary == "default")
         return new Boundary(modelin, inputin);
     else
@@ -519,7 +522,7 @@ void Boundary::set_bc(double* restrict a, double* restrict agrad, double* restri
     }
 }
 
-// BOUNDARY CONDITIONS THAT CONTAIN A 2D PATTERN
+// BOUNDARY CONDITIONS THAT CONTAIN A 2D PATTERN -- WHY ONLY FOR 2D PATTERN??
 void Boundary::calc_ghost_cells_bot_2nd(double* restrict a, double* restrict dzh, Boundary_type boundary_type,
                                         double* restrict abot, double* restrict agradbot)
 {

@@ -189,7 +189,7 @@ void Fields::init()
     for (int k=0; k<grid->kcells; ++k)
     {
         rhoref[k] = 1.;
-        rhorefh[k] = 1.; 
+        rhorefh[k] = 1.;
     }
 
     // allocate help arrays for statistics;
@@ -200,13 +200,13 @@ void Fields::init()
     for (int k=0; k<grid->kcells; ++k)
     {
         umodel[k] = 0.;
-        vmodel[k] = 0.; 
+        vmodel[k] = 0.;
     }
 
     // Get global cross-list from cross.cxx
-    std::vector<std::string> *crosslist_global = model->cross->get_crosslist(); 
+    std::vector<std::string> *crosslist_global = model->cross->get_crosslist();
 
-    // Check different type of crosses and put them in their respective lists 
+    // Check different type of crosses and put them in their respective lists
     for (FieldMap::const_iterator it=ap.begin(); it!=ap.end(); ++it)
     {
         check_added_cross(it->first, "",        crosslist_global, &crosssimple);
@@ -224,7 +224,7 @@ void Fields::init()
     }
 
     // Get global dump-list from cross.cxx
-    std::vector<std::string> *dumplist_global = model->dump->get_dumplist(); 
+    std::vector<std::string> *dumplist_global = model->dump->get_dumplist();
 
     // Check if fields in dumplist are diagnostic fields, if not delete them and print warning
     std::vector<std::string>::iterator dumpvar=dumplist_global->begin();
@@ -246,7 +246,7 @@ void Fields::check_added_cross(std::string var, std::string type, std::vector<st
     std::vector<std::string>::iterator position;
 
     position = std::find(crosslist->begin(), crosslist->end(), var + type);
-    if (position != crosslist->end()) 
+    if (position != crosslist->end())
     {
         // don't allow lngrad in 2nd order mode
         if (!(type == "lngrad" && grid->swspatialorder == "2"))
@@ -272,9 +272,9 @@ void Fields::exec()
 void Fields::get_mask(Field3d *mfield, Field3d *mfieldh, Mask *m)
 {
     if (m->name == "wplus")
-        calc_mask_wplus(mfield->data, mfieldh->data, mfieldh->databot, 
+        calc_mask_wplus(mfield->data, mfieldh->data, mfieldh->databot,
                         stats->nmask, stats->nmaskh, &stats->nmaskbot, w->data);
-    else if (m->name == "wmin")                                                  
+    else if (m->name == "wmin")
         calc_mask_wmin(mfield->data, mfieldh->data, mfieldh->databot,
                        stats->nmask, stats->nmaskh, &stats->nmaskbot, w->data);
 }
@@ -469,7 +469,7 @@ void Fields::exec_stats(Mask *m)
     // calculate the stats on the v location
     grid->interpolate_2nd(atmp["tmp1"]->data, atmp["tmp3"]->data, sloc, vloc);
     stats->calc_mean(m->profs["v"].data, v->data, grid->vtrans, vloc, atmp["tmp1"]->data, stats->nmask);
-    stats->calc_mean(vmodel            , v->data, NoOffset   , vloc, atmp["tmp1"]->data, stats->nmask);
+    stats->calc_mean(vmodel            , v->data, NoOffset    , vloc, atmp["tmp1"]->data, stats->nmask);
     for (int n=2; n<5; ++n)
     {
         std::stringstream ss;
@@ -833,7 +833,7 @@ void Fields::load(int n)
         else
         {
             master->print_message("OK\n");
-        }  
+        }
     }
 
     if (nerror)
@@ -923,7 +923,7 @@ void Fields::save(int n)
         {
             master->print_message("FAILED\n");
             ++nerror;
-        }  
+        }
         else
         {
             master->print_message("OK\n");
@@ -1025,8 +1025,8 @@ double Fields::calc_tke_2nd(double* restrict u, double* restrict v, double* rest
             for (int i=grid->istart; i<grid->iend; ++i)
             {
                 const int ijk = i + j*jj + k*kk;
-                tke += ( interp2(u[ijk]*u[ijk], u[ijk+ii]*u[ijk+ii]) 
-                       + interp2(v[ijk]*v[ijk], v[ijk+jj]*v[ijk+jj]) 
+                tke += ( interp2(u[ijk]*u[ijk], u[ijk+ii]*u[ijk+ii])
+                       + interp2(v[ijk]*v[ijk], v[ijk+jj]*v[ijk+jj])
                        + interp2(w[ijk]*w[ijk], w[ijk+kk]*w[ijk+kk]))*dz[k];
             }
 

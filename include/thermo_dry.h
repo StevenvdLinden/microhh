@@ -47,7 +47,6 @@ class Thermo_dry : public Thermo
         void exec();                ///< Add the tendencies belonging to the buoyancy.
         unsigned long get_time_limit(unsigned long, double); ///< Compute the time limit (n/a for thermo_dry)
 
-
         void exec_stats(Mask*);
         void exec_cross();
         void exec_dump();
@@ -75,6 +74,7 @@ class Thermo_dry : public Thermo
 
         void calc_buoyancy(double *, double *, double *);     ///< Calculation of the buoyancy.
         void calc_N2(double *, double *, double *, double *); ///< Calculation of the Brunt-Vaissala frequency.
+        void calc_absolute_temperature(double *, const double *, const double *); ///< Calculation of the absolute temperature.
 
         // cross sections
         std::vector<std::string> crosslist;        ///< List with all crosses from ini file

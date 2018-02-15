@@ -191,24 +191,42 @@ void Radiation_edwards::exec()
         // calculation of downward radiation fluxes and resulting tendencies
         if (grid->swspatialorder == "2")
         {
-            calc_radiation_fluxes_dn_2(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
+            calc_radiation_fluxes_dn_2(dnflux, bandflux, fields->sp["th"]->data, grid->dzh);
         }
         else if (grid->swspatialorder == "4")
         {
-            calc_radiation_fluxes_dn_4(upflux, bandflux, fields->sp["th"]->data, grid->dzh);
+            calc_radiation_fluxes_dn_4(dnflux, bandflux, fields->sp["th"]->data, grid->dzh);
         }
 
         calc_radiation_tendency_dn(fields->sd["radt"]->data, grid->dzh, upflux, arbc, crbc);
 
     }
+    else
+    {
+        // update upwelling longwave at the bottom: 1st order correction for
+        // intermittent update of full radiation field.
+        // this is only used to update the Robin BC-coefficients, the associated
+        // energy flux is directly lost to space. based on Met Office LEM
+        //
+
+        // ERG RUW PROBEERSEL!
+        double* Lupnew = fields->atmp["tmp1"]->databot;
+
+        for (int n=0; n<grid->ijcells; ++n)
+        {
+            Lupnew[n] = 0;
+        }
+
+        calc_intermediate_surf_rad(Lupnew, fields->sp["th"]->databot, arbc, crbc);
+    }
 
     // apply the total radiative tendencies to the temperature tendencies.
-    // 1) Eventually radiation infrastructure to be used with all different thermo-modules:
+    // 1) eventually radiation infrastructure to be used with all different thermo-modules:
     //    so a switch, call to proper temperature field needed here
-    // 2) This function does not set the surface temperature tendency.
+    // 2) this function does not set the surface temperature tendency.
     //    Surface temperatures yet to be implemented via boundary-functions and Robin BC!
 
-    apply_radiation_tendency(fields->st["th"]->data,fields->sd["radt"]->data);
+    apply_radiation_tendency(fields->st["th"]->data, fields->sd["radt"]->data);
 }
 
 void Radiation_edwards::get_surface_radiation(Field3d* Qnet)
@@ -225,7 +243,7 @@ void Radiation_edwards::calc_radiation_fluxes_up_2(double* restrict flux_up, dou
     const int ntot= grid->ncells;
 
     const double tau_min = 1e-8; // constant minimal optical depth
-    const double rho_air = 1.15; // air density for radiation
+    const double rho_air = 0.937; // air density for radiation
     const double diffus  = 1.66; // optical diffusivity
 
     double* Tbot = fields->sp["th"]->databot;
@@ -295,7 +313,7 @@ void Radiation_edwards::calc_radiation_fluxes_dn_2(double* restrict flux_dn, dou
     const int ntot= grid->ncells;
 
     const double tau_min = 1e-8; // constant minimal optical depth
-    const double rho_air = 1.15; // air density for radiation
+    const double rho_air = 0.937; // air density for radiation
     const double diffus  = 1.66; // optical diffusivity
 
     // loop over radiation bands
@@ -361,7 +379,7 @@ void Radiation_edwards::calc_radiation_fluxes_up_4(double* restrict flux_up, dou
     const int ntot= grid->ncells;
 
     const double tau_min = 1e-8;
-    const double rho_air = 1.15;
+    const double rho_air = 0.937;
     const double diffus  = 1.66;
 
     double * Tbot = fields->sp["th"]->databot;
@@ -431,7 +449,7 @@ void Radiation_edwards::calc_radiation_fluxes_dn_4(double* restrict flux_dn, dou
     const int ntot= grid->ncells;
 
     const double tau_min = 1e-8; // constant minimal optical depth
-    const double rho_air = 1.15; // air density for radiation
+    const double rho_air = 0.937; // air density for radiation
     const double diffus  = 1.66; // optical diffusivity
 
     // loop over radiation bands
@@ -490,13 +508,38 @@ void Radiation_edwards::calc_radiation_fluxes_dn_4(double* restrict flux_dn, dou
     }
 }
 
+void Radiation_edwards::calc_intermediate_surf_rad(double* restrict Lup, const double* restrict Tbot, double* restrict QnT, double* restrict QnC)
+{
+    const int ii  = 1;
+    const int jj  = grid->icells;
+
+    // loop over radiation bands
+    for (int kr=0; kr<nlines; ++kr)
+    {
+        // calculate outgoing radiative fluxes at surface
+
+        for (int j=grid->jstart; j<grid->jend; ++j)
+#pragma ivdep
+        for (int i=grid->istart; i<grid->iend; ++i)
+        {
+            const int ij = i + j*jj;
+
+            Lup[ij] += pl0[kr] + pl1[kr] * Tbot[ij];
+            // function above could be replaced by (BUT then pass full temperature field):
+            // fl_up_nr[ijk_bot] = pl0[kr] + pl1[kr] * interp4(temp[ijk_bot+kk],temp[ijk_bot],temp[ijk_bot-kk],temp[ijk_bot-2*kk]); ?
+        }
+    }
+
+      // ADD: update of Robin-BC components!!
+}
+
 void Radiation_edwards::calc_radiation_tendency_up(double* restrict radtend, const double* restrict dzh, const double* restrict flux_up, double* restrict QnT, double* restrict QnC)
 {
     const int ii = 1;
     const int jj = grid->icells;
     const int kk = grid->ijcells;
 
-    const double rho_air = 1.15; // air density for radiation
+    const double rho_air = 0.937; // air density for radiation
 
     for (int k=grid->kstart; k<grid->kend; ++k)
         for (int j=grid->jstart; j<grid->jend; ++j)
@@ -523,7 +566,7 @@ void Radiation_edwards::calc_radiation_tendency_dn(double* restrict radtend, con
     const int jj = grid->icells;
     const int kk = grid->ijcells;
 
-    const double rho_air = 1.15; // air density for radiation
+    const double rho_air = 0.937; // air density for radiation
 
     for (int k=grid->kstart; k<grid->kend; ++k)
         for (int j=grid->jstart; j<grid->jend; ++j)

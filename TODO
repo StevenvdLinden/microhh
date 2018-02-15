@@ -1,0 +1,23 @@
+MICROHH TODO LIST
+Fri Feb  2 09:53:57 CET 2018
+src/fields.cxx:187: Define a reference density. Needs to be replaced once anelastic is there
+src/fields.cxx:608: remove these from the model?
+src/force.cxx:172: make sure to give each element its own time series and remove the clear()
+src/thermo_moist.cxx:184:                    const double F   = 1.; : test)
+src/thermo_moist.cxx:503:                        const double F   = 1.; : test)
+src/thermo_moist.cxx:1603: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
+src/diff_scm.cxx:323: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
+src/model.cxx:101: Make an interface that takes this out of the main loop.
+src/budget_4.cxx:220: put the correct value for visc here!!!!!
+src/budget_4.cxx:228: put the correct value for visc here!!!!!
+src/budget_4.cxx:667: implement the proper BC as soon as the full BC's for pressure are added
+src/grid.cxx:460: add the vertical component
+src/grid.cxx:495: add the vertical component
+src/fields.cu:32: use interp2 functions instead of manual interpolation
+src/budget_2.cxx:670: : what to do with w2_pres and uw_pres at the top boundary? Pressure at k=kend is undefined?
+src/stats.cxx:560: this might not be accurate enough, extrapolate properly
+src/stats.cxx:578: the count function assumes that the variable to count is at the mask location
+src/diff_smag2.cxx:320: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
+src/thermo_dry.cxx:288: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
+include/fields.h:95: remove these to and bring them to diffusion model
+include/model.h:58: maybe it is safer to create get functions

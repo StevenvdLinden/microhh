@@ -1,1 +1,2 @@
 # Files to be kept under a git clean -f
+.DS_Store

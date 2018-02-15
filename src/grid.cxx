@@ -433,10 +433,10 @@ void Grid::set_minimum_ghost_cells(const int igcin, const int jgcin, const int k
     igc = std::max(igc, igcin);
     jgc = std::max(jgc, jgcin);
     kgc = std::max(kgc, kgcin);
-    
+
     // BvS: this doesn't work; imax is undefined if this routine is called from a class constructor
     // Removed it since this check is anyhow always performed from the init() of grid (after defining imax)
-    //check_ghost_cells(); 
+    //check_ghost_cells();
 }
 
 /**

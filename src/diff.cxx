@@ -36,6 +36,7 @@
 #include "diff_2.h"
 #include "diff_4.h"
 #include "diff_smag2.h"
+#include "diff_scm.h"
 
 Diff::Diff(Model* modelin, Input* inputin)
 {
@@ -61,11 +62,15 @@ Diff* Diff::factory(Master* masterin, Input* inputin, Model* modelin, const std:
 {
     std::string swdiff;
     std::string swboundary;
+    std::string swadvec;
 
     int nerror = 0;
     nerror += inputin->get_item(&swdiff, "diff", "swdiff", "", swspatialorder);
     // load the boundary switch as well in order to be able to check whether the surface model is used
     nerror += inputin->get_item(&swboundary, "boundary", "swboundary", "", "default");
+    // load the advection switch as well in order to be able to check whether it is disbled
+    nerror += inputin->get_item(&swadvec, "advec", "swadvec", "", swspatialorder);
+
     if (nerror)
         return 0;
 
@@ -84,6 +89,23 @@ Diff* Diff::factory(Master* masterin, Input* inputin, Model* modelin, const std:
         {
             masterin->print_error("swdiff=\"smag2\" requires a surface model (swboundary = \"surface\", \"surface_bulk\" or \"surface_patch\")\n");
             throw 1;
+        }
+    }
+    else if (swdiff == "scm")
+    {
+        // the single column model requires a surface model because of the MO matching at first level
+        if ((swboundary == "surface") || (swboundary == "surface_bulk"))
+            return new Diff_scm(modelin, inputin);
+        else
+        {
+            masterin->print_error("swdiff=\"SCM\" requires a surface model (swboundary = \"surface\" or \"surface_bulk\")\n");
+            throw 1;
+        }
+
+        if (!(swadvec == "0"))
+        {
+          masterin->print_error("swadvec=\"2\" or \"4\" is not allowed in single column mode; use swadvec=\"0\"\n");
+          throw 1;
         }
     }
     else

@@ -123,6 +123,9 @@ class Stats
 
         void calc_sorted_prof(double*, double*, double*);
 
+        void write_profile (double*, double*, int*);
+        void write_profileh(double*, double*, int*);
+
     private:
         int nstats;
 

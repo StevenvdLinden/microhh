@@ -1,0 +1,21 @@
+#!/bin/bash
+
+echo Do microhhen
+
+#cd ../../build/
+#make clean && make -j
+
+#cd ../cases/steven
+
+export TMPDIR=/tmp
+#rm th.* time.* grid.0000000 fftwplan.0000000 u.* v.* w.* steven.default.* steven.out
+#ln -sf ../../build/microhh
+
+mpiexec -n 1 ./microhh init evolve_BL_DNS
+mpiexec -n 1 ./microhh run evolve_BL_DNS
+
+#./microhh init steven
+#valgrind ./microhh run steven
+
+killall microhh
+

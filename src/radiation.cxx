@@ -31,6 +31,7 @@
 #include "radiation.h"
 #include "radiation_disabled.h"
 #include "radiation_edwards.h"
+#include "radiation_edwards_horav.h"
 
 Radiation::Radiation(Model* modelin, Input* inputin)
 {
@@ -56,6 +57,8 @@ Radiation* Radiation::factory(Master* masterin, Input* inputin, Model* modelin)
         return new Radiation_disabled(modelin, inputin);
     else if (swradiation == "edwards")
         return new Radiation_edwards(modelin, inputin);
+    else if (swradiation == "edwards_horav")
+        return new Radiation_edwards_horav(modelin, inputin);
     else
     {
         masterin->print_error("\"%s\" is an illegal value for swradiation\n", swradiation.c_str());
