@@ -1,8 +1,8 @@
 MICROHH TODO LIST
-Fri Feb  2 09:53:57 CET 2018
+Thu Feb 22 10:37:32 CET 2018
 src/fields.cxx:187: Define a reference density. Needs to be replaced once anelastic is there
 src/fields.cxx:608: remove these from the model?
-src/force.cxx:172: make sure to give each element its own time series and remove the clear()
+src/force.cxx:180: make sure to give each element its own time series and remove the clear()
 src/thermo_moist.cxx:184:                    const double F   = 1.; : test)
 src/thermo_moist.cxx:503:                        const double F   = 1.; : test)
 src/thermo_moist.cxx:1603: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...

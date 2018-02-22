@@ -65,6 +65,8 @@ class Force
         std::string get_switch_lspres()      { return swlspres; }
         double      get_coriolis_parameter() { return fc;       }
 
+        void exec_stats(Mask*);
+
     private:
         Master* master; ///< Pointer to master class.
         Model*  model;  ///< Pointer to model class.
@@ -81,6 +83,8 @@ class Force
         double* ug;  ///< Pointer to array u-component geostrophic wind.
         double* vg;  ///< Pointer to array v-component geostrophic wind.
         double* wls; ///< Pointer to array large-scale vertical velocity.
+
+        double* st_wls; ///< Pointer to array scalar tendency profile due to subsidence.
 
         // time dependent variables
         std::string swtimedep;
@@ -105,6 +109,12 @@ class Force
 
         void advec_wls_2nd(double* const, const double* const,
                            const double* const, const double* const); ///< Calculates the large-scale vertical transport.
+
+        void advec_wls_2nd_forstat(double* const, const double* const,
+                            const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
+
+        void init_stat();
+        Stats* stats;
 
         // GPU functions and variables
         double* ug_g;  ///< Pointer to GPU array u-component geostrophic wind.
