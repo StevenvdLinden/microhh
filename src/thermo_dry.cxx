@@ -531,7 +531,7 @@ void Thermo_dry::init_stat()
         stats->add_prof("bdiff", "Diffusive flux of the buoyancy", "m2 s-3", "zh");
         stats->add_prof("bflux", "Total flux of the buoyancy", "m2 s-3", "zh");
 
-        stats->add_prof("bsort", "Sorted buoyancy", "m s-2", "z");
+        //stats->add_prof("bsort", "Sorted buoyancy", "m s-2", "z"); ///< Avoid conflict when using budget4
     }
 }
 

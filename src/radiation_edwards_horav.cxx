@@ -282,7 +282,7 @@ void Radiation_edwards_horav::calc_radiation_fluxes_up_2(double* restrict flux_u
             bbt = pl0[kr] + pl1[kr] * interp2(temp[k-1], temp[k]);
             bbb = pl0[kr] + pl1[kr] * interp2(temp[k-2], temp[k-1]);
 
-            std::printf("%4d\t%7.4f\t%7.4f\n",k,interp2(temp[k-1], temp[k]),interp2(temp[k-2], temp[k-1]));
+            //std::printf("%4d\t%7.4f\t%7.4f\n",k,interp2(temp[k-1], temp[k]),interp2(temp[k-2], temp[k-1]));
 
             // calculate upward flux for current level and radiation band
             fl_up_nr[k] = bbt + trans * (fl_up_nr[k-1] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau);
