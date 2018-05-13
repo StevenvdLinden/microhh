@@ -20,19 +20,22 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef DIFF_SCM
-#define DIFF_SCM
+#ifndef DIFF_SGS_TKE
+#define DIFF_SGS_TKE
 
 #include "diff.h"
 
-class Diff_scm : public Diff
+class Diff_sgs_tke : public Diff
 {
     public:
-        Diff_scm(Model*, Input*);
-        ~Diff_scm();
+        Diff_sgs_tke(Model*, Input*);
+        ~Diff_sgs_tke();
 
         void exec();
         void exec_viscosity();
+
+        void set_values(); ///< this is not empty anymore, used to initialise statistics ... SvdLinden
+        void exec_stats(Mask*); ///< function for additional statistics
 
         unsigned long get_time_limit(unsigned long, double);
         double get_dn(double);
@@ -46,8 +49,7 @@ class Diff_scm : public Diff
         #endif
 
         // Empty functions, there are allowed to pass.
-        void set_values() {}
-        void exec_stats(Mask*) {}
+        //void set_values() {}
 
     private:
         template<bool>
@@ -57,16 +59,18 @@ class Diff_scm : public Diff
                           double*, double*,
                           double*, double*, double*);
 
+        // NOOT: deze is reeds aangepast: double* toegevoegd voor sgs_tke-veld
+        template<bool>
         void calc_evisc(double*,
-                        double*, double*, double*, double*,
+                        double*, double*, double*, double*, double*,
                         double*, double*, double*,
                         double*, double*,
                         double*, double*, double*,
-                        double);
+                        double, double);
 
         template<bool>
         void calc_evisc_neutral(double*,
-                                double*, double*, double*,
+                                double*, double*, double*, double*,
                                 double*, double*,
                                 double*, double*,
                                 double, double);
@@ -77,11 +81,39 @@ class Diff_scm : public Diff
         void diff_v(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);
 
         void diff_w(double*, double*, double*, double*, double*, double*, double*, double*, double*);
-        void diff_c(double*, double*, double*, double*, double*, double*, double*, double*, double*, double);
+
+        template<bool>
+        void diff_c(double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*, double*);
 
         double calc_dnmul(double*, double*, double);
 
+        void init_stats(); ///< initialize additional statistiscs
+        void calc_prandtl(double*, double*, double*, double*);
+
         double cs;
+
+        // Added functions specifically for prognostic equation for SGS TKE ///< SJA van der Linden, 7 May 2018
+        template<bool>
+        void diff_sgs_tke(double*, double*, double*, double*, double*, double*, double*, double*, double*);
+
+        void calc_sgs_tke_shear_tend_2nd   (double*, double*, double*);
+        void calc_sgs_tke_buoyancy_tend_2nd(double*, double*, double*, double*, double*);
+        void calc_sgs_tke_dissipation_2nd  (double*, double*, double*, double*);
+
+        // For now, 4th order is not implemented ///< SJA van der Linden, 7 May 2018
+        void calc_sgs_tke_shear_tend_4th() {}
+        void calc_sgs_tke_buoyancy_tend_4th(){}
+        void calc_sgs_tke_dissipation_4th() {}
+
+        // For now place additional constants for SGS-TKE model (Deardorff; 1973,1980) here ///< SJA van der Linden, 7 May 2018
+        const double ap  = 1.5;
+        const double cf  = 2.5;
+        const double ce1 = 0.19;
+        const double ce2 = 0.51;
+        const double cm  = 0.12;
+        const double ch1 = 1.0;
+        const double ch2 = 2.0;
+        const double cn  = 0.76;
 
         #ifdef USECUDA
         double* mlen_g;

@@ -444,6 +444,7 @@ void Model::calc_stats(std::string maskname)
     thermo   ->exec_stats(&stats->masks[maskname]);
     budget   ->exec_stats(&stats->masks[maskname]);
     boundary ->exec_stats(&stats->masks[maskname]);
+    diff     ->exec_stats(&stats->masks[maskname]);
     radiation->exec_stats(&stats->masks[maskname]);
     force    ->exec_stats(&stats->masks[maskname]);
 }

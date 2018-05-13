@@ -39,6 +39,7 @@ class Diff_2 : public Diff
 
         // Empty functions, these are allowed to pass.
         void exec_viscosity() {}
+        void exec_stats(Mask*) {}
 
         #ifdef USECUDA
         void prepare_device() {};

@@ -44,13 +44,14 @@ class Diff_4 : public Diff
 
         // Empty functions, these are allowed to pass.
         void exec_viscosity() {}
+        void exec_stats(Mask*) {}
 
     private:
         double dnmul;
 
         template<bool>
         void diff_c(double* restrict, double* restrict, double* restrict, double* restrict, double);
-        template<bool> 
+        template<bool>
         void diff_w(double* restrict, double* restrict, double* restrict, double* restrict, double);
 };
 #endif

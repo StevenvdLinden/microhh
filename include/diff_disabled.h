@@ -43,6 +43,7 @@ class Diff_disabled : public Diff
         void set_values() {}
         void exec_viscosity() {}
         void exec() {}
+        void exec_stats(Mask*) {}
 
         #ifdef USECUDA
         // GPU functions and variables

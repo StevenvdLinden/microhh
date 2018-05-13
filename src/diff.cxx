@@ -29,6 +29,8 @@
 #include "defines.h"
 #include "constants.h"
 #include "model.h"
+// Moet hier ook al advection zichtbaar zijn? En automatisch ook derived class
+//#include "advec.h"
 
 // diffusion schemes
 #include "diff.h"
@@ -37,6 +39,7 @@
 #include "diff_4.h"
 #include "diff_smag2.h"
 #include "diff_scm.h"
+#include "diff_sgs_tke.h"
 
 Diff::Diff(Model* modelin, Input* inputin)
 {
@@ -68,7 +71,7 @@ Diff* Diff::factory(Master* masterin, Input* inputin, Model* modelin, const std:
     nerror += inputin->get_item(&swdiff, "diff", "swdiff", "", swspatialorder);
     // load the boundary switch as well in order to be able to check whether the surface model is used
     nerror += inputin->get_item(&swboundary, "boundary", "swboundary", "", "default");
-    // load the advection switch as well in order to be able to check whether it is disbled
+    // load the advection switch as well in order to be able to check whether it is disabled
     nerror += inputin->get_item(&swadvec, "advec", "swadvec", "", swspatialorder);
 
     if (nerror)
@@ -91,8 +94,24 @@ Diff* Diff::factory(Master* masterin, Input* inputin, Model* modelin, const std:
             throw 1;
         }
     }
+    else if (swdiff == "sgs_tke")
+    {
+        // the subgrid model requires a surface model because of the MO matching at first level
+        if ((swboundary == "surface" && swspatialorder == "2")) //|| (swboundary == "surface_bulk") || (swboundary == "surface_patch"))
+            return new Diff_sgs_tke(modelin, inputin);
+        else
+        {
+            masterin->print_error("swdiff=\"sgs_tke\" currently only works with (swboundary = \"surface\") and/or with (swspatialorder = \"2\")\n");
+            //masterin->print_error("swdiff=\"sgs_tke\" requires a surface model (swboundary = \"surface\", \"surface_bulk\" or \"surface_patch\")\n");
+            throw 1;
+        }
+    }
     else if (swdiff == "scm")
     {
+
+        masterin->print_error("swdiff=\"SCM\" is not implemented yet ;)\n");
+        throw 1;
+
         // the single column model requires a surface model because of the MO matching at first level
         if ((swboundary == "surface") || (swboundary == "surface_bulk"))
             return new Diff_scm(modelin, inputin);

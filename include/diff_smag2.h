@@ -45,8 +45,9 @@ class Diff_smag_2 : public Diff
         void clear_device();
         #endif
 
-        // Empty functions, there are allowed to pass.
+        // Empty functions, they are allowed to pass.
         void set_values() {}
+        void exec_stats(Mask*) {}
 
     private:
         template<bool>
