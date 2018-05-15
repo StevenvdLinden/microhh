@@ -75,8 +75,8 @@ Diff_sgs_tke::~Diff_sgs_tke()
 
 void Diff_sgs_tke::set_values() // this is probably the ugliest solution, there is no create function for the diffusion class, so just initialise stats here ...
 {
-    if (model->thermo->get_switch() != "0")
-        init_stats();
+    //if (model->thermo->get_switch() != "0")
+        //init_stats();
 }
 
 #ifndef USECUDA
@@ -143,13 +143,13 @@ void Diff_sgs_tke::exec_viscosity()
         // Calculate eddy viscosity using MO at lowest model level
         if (model->boundary->get_switch() == "surface")
             calc_evisc_neutral<false>(fields->sd["evisc"]->data,
-                                      fields->sp["sge_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
+                                      fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
                                       fields->u->datafluxbot, fields->v->datafluxbot,
                                       grid->z, grid->dz, boundaryptr->z0m, fields->visc);
         // Calculate eddy viscosity assuming resolved walls
         else
             calc_evisc_neutral<true>(fields->sd["evisc"]->data,
-                                     fields->sp["sge_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
+                                     fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
                                      fields->u->datafluxbot, fields->v->datafluxbot,
                                      grid->z, grid->dz, 0, fields->visc); // BvS, for now....
     }
@@ -165,7 +165,7 @@ void Diff_sgs_tke::exec_viscosity()
 
         if (model->boundary->get_switch() == "surface")
             calc_evisc<false>(fields->sd["evisc"]->data,
-                             fields->sp["sge_tke"]->data, fields->u->data, fields->v->data, fields->w->data, fields->atmp["tmp1"]->data,
+                             fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data, fields->atmp["tmp1"]->data,
                              fields->u->datafluxbot, fields->v->datafluxbot, fields->atmp["tmp1"]->datafluxbot,
                              boundaryptr->ustar, boundaryptr->obuk,
                              grid->z, grid->dz, grid->dzi,
@@ -173,7 +173,7 @@ void Diff_sgs_tke::exec_viscosity()
 
         else
             calc_evisc<true>(fields->sd["evisc"]->data,
-                            fields->sp["sge_tke"]->data, fields->u->data, fields->v->data, fields->w->data, fields->atmp["tmp1"]->data,
+                            fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data, fields->atmp["tmp1"]->data,
                             fields->u->datafluxbot, fields->v->datafluxbot, fields->atmp["tmp1"]->datafluxbot,
                             0, 0,
                             grid->z, grid->dz, grid->dzi,
@@ -193,7 +193,7 @@ void Diff_sgs_tke::exec()
     double* N2 = fields->atmp["tmp1"]->data;
 
     // Do calculation in this order so temp1 'can be recycled'; SvdLinden, May 2018
-
+    std::printf("Correctly stepped into exec\n");
     // Calculate strain rate squared for use in SGS TKE production and store in tmp1
     if (model->boundary->get_switch() == "surface")
         calc_strain2<false>(S2,
@@ -209,7 +209,7 @@ void Diff_sgs_tke::exec()
                            NULL, NULL, // BvS, for now....
                            grid->z, grid->dzi, grid->dzhi);
 
-    calc_sgs_tke_shear_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["evisc"]->data, S2);
+    // calc_sgs_tke_shear_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["evisc"]->data, S2);
 
     // Retrieve buoyancy field for use in SGS TKE production and store in tmp1
     // these functions have been exactly copied from the exec_viscosity()-function above
@@ -217,12 +217,12 @@ void Diff_sgs_tke::exec()
     model->thermo->get_buoyancy_fluxbot(fields->atmp["tmp1"]);
     // retrieve the full field in tmp1 and use tmp2 for temporary calculations
     model->thermo->get_thermo_field(fields->atmp["tmp1"], fields->atmp["tmp2"], "N2", false);
-
-    calc_sgs_tke_buoyancy_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, fields->sp["evisc"]->data, N2,
+    std::printf("correctly got strain2 and thermo fields\n");
+    calc_sgs_tke_buoyancy_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, fields->sd["evisc"]->data, N2,
                                   grid->dz);
     calc_sgs_tke_dissipation_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, N2,
                                 grid->dz);
-
+    std::printf("correctly calculated buoyance tendency and dissipation\n");
     if(model->boundary->get_switch() == "surface")
     {
         diff_u<false>(fields->ut->data, fields->u->data, fields->v->data, fields->w->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
@@ -236,15 +236,17 @@ void Diff_sgs_tke::exec()
         // NOOT: currently, this would work because tmp2 which holds N2 should NOT be overwritten already at this stage.
         for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
         {
-            if(it->second->name.c_str()== "sgs_tke") // NOOT : is dit de correcte verwijzing naar sgs_tke-veld, hoe werkt de Map ? Waarom ->second i.p.v. ->first ?
+            if(it->second->name.c_str()== "sgs_tket") // NOOT : is dit de correcte verwijzing naar sgs_tke-veld, hoe werkt de Map ? Waarom ->second i.p.v. ->first ?
             {
                 diff_sgs_tke<false>(it->second->data, fields->sp[it->first]->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
                              fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
+                std::printf("correctly did diffustion of SGS TKE\n");
             }
             else
             {
                 diff_c<false>(it->second->data, fields->sp[it->first]->data, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
                       fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
+                std::printf("correctly did diffustion of %s\n",it->second->name.c_str());
             }
         }
     }
@@ -261,7 +263,7 @@ void Diff_sgs_tke::exec()
         // NOOT: currently, this would work because tmp2 which holds N2 should NOT be overwritten already at this stage.
         for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
         {
-            if(it->second->name.c_str() == "sgs_tke")
+            if(it->second->name.c_str() == "sgs_tket")
             {
                 diff_sgs_tke<true>(it->second->data, fields->sp[it->first]->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
                             fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
