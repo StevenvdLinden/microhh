@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -256,5 +256,14 @@ void Master::max(double *var, int datasize)
 void Master::min(double *var, int datasize)
 {
     MPI_Allreduce(MPI_IN_PLACE, var, datasize, MPI_DOUBLE, MPI_MIN, commxy);
+}
+
+// Only use this function for situations where only one (or more, but not all)
+// processes need to abort the simulation. If all tasks are guaranteed to abort the simulation,
+// simply use a throw on each process, as that more gracefully exits the model.
+void Master::abort()
+{
+    int error_code;
+    MPI_Abort(commxy, error_code);
 }
 #endif

@@ -1,3 +1,25 @@
+/*
+ * MicroHH
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
+ *
+ * This file is part of MicroHH
+ *
+ * MicroHH is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+
+ * MicroHH is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+
+ * You should have received a copy of the GNU General Public License
+ * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #ifndef THERMO_MOIST_FUNCTIONS
 #define THERMO_MOIST_FUNCTIONS
 
@@ -23,6 +45,11 @@ namespace Thermo_moist_functions
     CUDA_MACRO inline double virtual_temperature(const double exn, const double thl, const double qt, const double ql)
     {
         return (thl + Lv*ql/(cp*exn)) * (1. - (1. - Rv/Rd)*qt - Rv/Rd*ql);
+    }
+
+    CUDA_MACRO inline double virtual_temperature_no_ql(const double exn, const double thl, const double qt)
+    {
+        return thl * (1. - (1. - Rv/Rd)*qt);
     }
 
     CUDA_MACRO inline double buoyancy_no_ql(const double thl, const double qt, const double thvref)

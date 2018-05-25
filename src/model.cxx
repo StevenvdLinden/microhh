@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -23,6 +23,7 @@
 #include <string>
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 #include "master.h"
 #include "grid.h"
 #include "fields.h"
@@ -39,8 +40,10 @@
 #include "buffer.h"
 #include "force.h"
 #include "stats.h"
+#include "model.h"
 #include "cross.h"
 #include "dump.h"
+#include "column.h"
 #include "budget.h"
 
 #ifdef USECUDA
@@ -66,6 +69,7 @@ Model::Model(Master *masterin, Input *inputin)
     radiation = 0;
 
     stats  = 0;
+    column = 0;
     cross  = 0;
     dump   = 0;
     budget = 0;
@@ -92,6 +96,7 @@ Model::Model(Master *masterin, Input *inputin)
 
         // Create instances of the statistics classes. First create stats as it is required for init of derived stats.
         stats  = new Stats (this, input);
+        column = new Column(this, input);
         cross  = new Cross (this, input);
         dump   = new Dump  (this, input);
 
@@ -137,6 +142,7 @@ void Model::delete_objects()
     delete budget;
     delete dump;
     delete cross;
+    delete column;
     delete stats;
     delete buffer;
     delete force;
@@ -158,6 +164,8 @@ Model::~Model()
     delete_objects();
     #ifdef USECUDA
     cudaDeviceReset();
+    if(t_stat.joinable())
+        t_stat.join();
     #endif
 }
 
@@ -175,6 +183,7 @@ void Model::init()
     radiation->init(timeloop->get_ifactor());
 
     stats ->init(timeloop->get_ifactor());
+    column->init(timeloop->get_ifactor());
     cross ->init(timeloop->get_ifactor());
     dump  ->init(timeloop->get_ifactor());
     budget->init();
@@ -188,12 +197,14 @@ void Model::load()
     timeloop->load(timeloop->get_iotime());
 
     // Initialize the statistics file to open the possiblity to add profiles.
-    stats->create(timeloop->get_iotime());
-    cross->create();
-    dump ->create();
+    stats ->create(timeloop->get_iotime());
+    column->create(timeloop->get_iotime());
+    cross ->create();
+    dump  ->create();
 
     fields->load(timeloop->get_iotime());
     fields->create_stats();
+    fields->create_column();
 
     // Initialize data or load data from disk.
     boundary->create(input);
@@ -237,6 +248,7 @@ void Model::exec()
     force   ->prepare_device();
     // Prepare pressure last, for memory check
     pres    ->prepare_device();
+
     #endif
 
     master->print_message("Starting time integration\n");
@@ -244,6 +256,7 @@ void Model::exec()
     // Update the time dependent parameters.
     boundary->update_time_dependent();
     force   ->update_time_dependent();
+    thermo  ->update_time_dependent();
 
     // Set the boundary conditions.
     boundary->exec();
@@ -294,59 +307,20 @@ void Model::exec()
         // Allow only for statistics when not in substep and not directly after restart.
         if (timeloop->is_stats_step())
         {
-            #ifdef USECUDA
             // Copy fields from device to host
-            if (stats->doStats() || cross->do_cross() || dump->do_dump())
+            if (stats->doStats() || cross->do_cross() || dump->do_dump() || column->doColumn())
             {
+                #ifdef USECUDA
+                if(t_stat.joinable())
+                    t_stat.join();
                 fields  ->backward_device();
                 boundary->backward_device();
-            }
-            #endif
-
-            // Do the statistics.
-            if (stats->doStats())
-            {
-                // Always process the default mask (the full field)
-                stats->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks["default"]);
-                calc_stats("default");
-
-                // Work through the potential masks for the statistics.
-                for (std::vector<std::string>::const_iterator it=masklist.begin(); it!=masklist.end(); ++it)
-                {
-                    if (*it == "wplus" || *it == "wmin")
-                    {
-                        fields->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
-                        calc_stats(*it);
-                    }
-                    else if (*it == "ql" || *it == "qlcore")
-                    {
-                        thermo->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
-                        calc_stats(*it);
-                    }
-                    else if (*it == "patch_high" || *it == "patch_low")
-                    {
-                        boundary->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
-                        calc_stats(*it);
-                    }
-                }
-
-                // Store the stats data.
-                stats->exec(timeloop->get_iteration(), timeloop->get_time(), timeloop->get_itime());
-            }
-
-            // Save the selected cross sections to disk, cross sections are handled on CPU.
-            if (cross->do_cross())
-            {
-                fields  ->exec_cross();
-                thermo  ->exec_cross();
-                boundary->exec_cross();
-            }
-
-            // Save the 3d dumps to disk
-            if (dump->do_dump())
-            {
-                fields->exec_dump();
-                thermo->exec_dump();
+                thermo  ->backward_device();
+                t_stat=std::thread(&Model::do_stat,this, stats->doStats(), cross->do_cross(), dump->do_dump(), column->doColumn(),
+                                    timeloop->get_iteration(), timeloop->get_time(), timeloop->get_itime(), timeloop->get_iotime());
+                #else
+                do_stat(stats->doStats(), cross->do_cross(), dump->do_dump(),column->doColumn(),timeloop->get_iteration(), timeloop->get_time(), timeloop->get_itime(), timeloop->get_iotime());
+                #endif
             }
         }
 
@@ -367,8 +341,11 @@ void Model::exec()
             if (timeloop->do_save())
             {
                 #ifdef USECUDA
+                if(t_stat.joinable())
+                    t_stat.join();
                 fields  ->backward_device();
                 boundary->backward_device();
+                thermo  ->backward_device();
                 #endif
 
                 // Save data to disk.
@@ -395,6 +372,7 @@ void Model::exec()
         // Update the time dependent parameters.
         boundary->update_time_dependent();
         force   ->update_time_dependent();
+        thermo  ->update_time_dependent();
 
         // Set the boundary conditions.
         boundary->exec();
@@ -412,11 +390,65 @@ void Model::exec()
 
     #ifdef USECUDA
     // At the end of the run, copy the data back from the GPU.
+    if(t_stat.joinable())
+        t_stat.join();
     fields  ->backward_device();
     boundary->backward_device();
+    thermo  ->backward_device();
     #endif
 }
 
+void Model::do_stat(bool doStats, bool doCross, bool doDump, bool doColumn, int iteration, double time, unsigned long itime, int iotime)
+{
+    // Do the statistics.
+    if(doStats)
+    {
+        // Always process the default mask (the full field)
+        stats->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks["default"]);
+        calc_stats("default");
+        // Work through the potential masks for the statistics.
+        for (std::vector<std::string>::const_iterator it=masklist.begin(); it!=masklist.end(); ++it)
+        {
+            if (*it == "wplus" || *it == "wmin")
+            {
+                fields->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
+                calc_stats(*it);
+            }
+            else if (*it == "ql" || *it == "qlcore")
+            {
+                thermo->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
+                calc_stats(*it);
+            }
+            else if (*it == "patch_high" || *it == "patch_low")
+            {
+                boundary->get_mask(fields->atmp["tmp3"], fields->atmp["tmp4"], &stats->masks[*it]);
+                calc_stats(*it);
+            }
+        }
+
+        // Store the stats data.
+        stats->exec(iteration, time, itime);
+    }
+    // Save the selected cross sections to disk, cross sections are handled on CPU.
+    if(doCross)
+    {
+        fields  ->exec_cross(iotime);
+        thermo  ->exec_cross(iotime);
+        boundary->exec_cross(iotime);
+    }
+// Save the 3d dumps to disk
+    if(doDump)
+    {
+        fields->exec_dump(iotime);
+        thermo->exec_dump(iotime);
+    }
+    if(doColumn)
+    {
+        fields->exec_column();
+        thermo->exec_column();
+        column->exec(iteration, time, itime);
+    }
+}
 void Model::set_time_step()
 {
     // Only set the time step if the model is not in a substep.
@@ -429,6 +461,7 @@ void Model::set_time_step()
     timeloop->set_time_step_limit(diff     ->get_time_limit(timeloop->get_idt(), timeloop->get_dt()));
     timeloop->set_time_step_limit(thermo   ->get_time_limit(timeloop->get_idt(), timeloop->get_dt()));
     timeloop->set_time_step_limit(radiation->get_time_limit(timeloop->get_itime()));
+    timeloop->set_time_step_limit(column   ->get_time_limit(timeloop->get_itime()));
     timeloop->set_time_step_limit(stats    ->get_time_limit(timeloop->get_itime()));
     timeloop->set_time_step_limit(cross    ->get_time_limit(timeloop->get_itime()));
     timeloop->set_time_step_limit(dump     ->get_time_limit(timeloop->get_itime()));
@@ -468,7 +501,7 @@ void Model::print_status()
         std::string outputname = master->simname + ".out";
         dnsout = std::fopen(outputname.c_str(), "a");
         std::setvbuf(dnsout, NULL, _IOLBF, 1024);
-        std::fprintf(dnsout, "%8s %11s %10s %11s %8s %8s %11s %16s %16s %16s\n",
+        std::fprintf(dnsout, "%8s %13s %10s %11s %8s %8s %11s %16s %16s %16s\n",
                 "ITER", "TIME", "CPUDT", "DT", "CFL", "DNUM", "DIV", "MOM", "TKE", "MASS");
         start = master->get_wall_clock_time();
     }
@@ -498,8 +531,15 @@ void Model::print_status()
 
         // Write the status information to disk.
         if (master->mpiid == 0)
-            std::fprintf(dnsout, "%8d %11.3E %10.4f %11.3E %8.4f %8.4f %11.3E %16.8E %16.8E %16.8E\n",
+            std::fprintf(dnsout, "%8d %13.6G %10.4f %11.3E %8.4f %8.4f %11.3E %16.8E %16.8E %16.8E\n",
                     iter, time, cputime, dt, cfl, dn, div, mom, tke, mass);
+
+        if (!std::isfinite(cfl))
+        {
+            master->print_error("Simulation has non-finite numbers.\n");
+            throw 1;
+        }
+
     }
 
     if (timeloop->is_finished())

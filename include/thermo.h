@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -49,9 +49,10 @@ class Thermo
         virtual unsigned long get_time_limit(unsigned long, double) = 0;
 
         virtual void exec_stats(Mask*) = 0;
-        virtual void exec_cross() = 0;
-        virtual void exec_dump() = 0;
-
+        virtual void exec_cross(int) = 0;
+        virtual void exec_dump(int) = 0;
+        virtual void exec_column() = 0;
+        
         virtual void get_mask(Field3d*, Field3d*, Mask*) = 0;
 
         // Interfacing functions to get buoyancy properties from other classes.
@@ -63,10 +64,15 @@ class Thermo
 
         virtual double get_buoyancy_diffusivity() = 0;
 
+        virtual void update_time_dependent() = 0;
+
         #ifdef USECUDA
         // GPU functions and variables.
         virtual void prepare_device() = 0;
         virtual void clear_device() = 0;
+        virtual void forward_device() = 0;
+        virtual void backward_device() = 0;
+
         #endif
 
     protected:

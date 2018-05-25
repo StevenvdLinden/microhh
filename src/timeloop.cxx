@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -210,6 +210,42 @@ void Timeloop::set_time_step()
         }
         idt = idtlim;
         dt  = (double)idt / ifactor;
+    }
+}
+
+void Timeloop::get_interpolation_factors(int& index0, int&index1, double& fac0, double& fac1, std::vector<double> timevec)
+{
+    // 1. Get the indexes and factors for the interpolation in time
+    index0 = 0;
+    index1 = 0;
+
+    for (auto& t : timevec)
+    {
+        if (time < t)
+            break;
+        else
+            ++index1;
+    }
+
+    // 2. Calculate the weighting factor, accounting for out of range situations where the simulation is longer than the time range in input
+    if (index1 == 0)
+    {
+        fac0   = 0.;
+        fac1   = 1.;
+        index0 = 0;
+    }
+    else if (index1 == timevec.size())
+    {
+        fac0   = 1.;
+        fac1   = 0.;
+        index0 = index1-1;
+        index1 = index0;
+    }
+    else
+    {
+        index0 = index1-1;
+        fac0 = (timevec[index1] - time) / (timevec[index1] - timevec[index0]);
+        fac1 = (time - timevec[index0]) / (timevec[index1] - timevec[index0]);
     }
 }
 

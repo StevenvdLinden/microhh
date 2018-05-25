@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -43,10 +43,12 @@ class Thermo_disabled : public Thermo
         void create(Input*) {}
         void exec() {}
         void exec_stats(Mask*) {}
-        void exec_cross() {}
-        void exec_dump() {}
+        void exec_column() {}        
+        void exec_cross(int) {}
+        void exec_dump(int) {}
         void get_mask(Field3d*, Field3d*, Mask*) {}
         void get_prog_vars(std::vector<std::string>*) {}
+        void update_time_dependent() {}
         double get_buoyancy_diffusivity();
 
         unsigned long get_time_limit(unsigned long, double);
@@ -54,6 +56,8 @@ class Thermo_disabled : public Thermo
 #ifdef USECUDA
         void prepare_device() {};
         void clear_device() {};
+        void forward_device() {};
+        void backward_device() {};
 #endif
 
         // Empty functions that shall throw.

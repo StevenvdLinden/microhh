@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -34,6 +34,7 @@
 #include "diff_smag2.h"
 #include "master.h"
 #include "cross.h"
+#include "column.h"
 #include "dump.h"
 
 #include "thermo_dry.h"
@@ -152,6 +153,7 @@ void Thermo_dry::create(Input *inputin)
     }
 
     init_stat();
+    init_column();
 }
 
 #ifndef USECUDA
@@ -239,7 +241,16 @@ void Thermo_dry::exec_stats(Mask *m)
     //stats->calc_sorted_prof(fields->sd["tmp1"]->data, fields->sd["tmp2"]->data, m->profs["bsort"].data);
 }
 
-void Thermo_dry::exec_cross()
+void Thermo_dry::exec_column()
+{
+    const double NoOffset = 0.;
+
+    // Buoyancy mean
+    model->column->calc_column(model->column->profs["b"].data, fields->atmp["tmp1"]->data, NoOffset);
+
+}
+
+void Thermo_dry::exec_cross(int iotime)
 {
     int nerror = 0;
 
@@ -255,14 +266,14 @@ void Thermo_dry::exec_cross()
         {
             //getThermoField(fields->s["tmp1"], fields->s["tmp2"], *it);
             calc_buoyancy(fields->atmp["tmp1"]->data, fields->sp["th"]->data, thref);
-            nerror += cross->cross_simple(fields->atmp["tmp1"]->data, fields->atmp["tmp2"]->data, *it);
+            nerror += cross->cross_simple(fields->atmp["tmp1"]->data, fields->atmp["tmp2"]->data, *it,iotime);
         }
         else if (*it == "blngrad")
         {
             //getThermoField(fields->s["tmp1"], fields->s["tmp2"], "b");
             calc_buoyancy(fields->atmp["tmp1"]->data, fields->sp["th"]->data, thref);
             // Note: tmp1 twice used as argument -> overwritten in crosspath()
-            nerror += cross->cross_lngrad(fields->atmp["tmp1"]->data, fields->atmp["tmp2"]->data, fields->atmp["tmp1"]->data, grid->dzi4, *it);
+            nerror += cross->cross_lngrad(fields->atmp["tmp1"]->data, fields->atmp["tmp2"]->data, fields->atmp["tmp1"]->data, grid->dzi4, *it,iotime);
         }
         else if (*it == "bbot" or *it == "bfluxbot")
         {
@@ -271,9 +282,9 @@ void Thermo_dry::exec_cross()
             calc_buoyancy_fluxbot(fields->atmp["tmp1"]->datafluxbot, fields->sp["th"]->datafluxbot, threfh);
 
             if (*it == "bbot")
-                nerror += cross->cross_plane(fields->atmp["tmp1"]->databot, fields->atmp["tmp1"]->data, "bbot");
+                nerror += cross->cross_plane(fields->atmp["tmp1"]->databot, fields->atmp["tmp1"]->data, "bbot",iotime);
             else if (*it == "bfluxbot")
-                nerror += cross->cross_plane(fields->atmp["tmp1"]->datafluxbot, fields->atmp["tmp1"]->data, "bfluxbot");
+                nerror += cross->cross_plane(fields->atmp["tmp1"]->datafluxbot, fields->atmp["tmp1"]->data, "bfluxbot",iotime);
         }
     }
 
@@ -281,7 +292,7 @@ void Thermo_dry::exec_cross()
         throw 1;
 }
 
-void Thermo_dry::exec_dump()
+void Thermo_dry::exec_dump(int iotime)
 {
     for (std::vector<std::string>::const_iterator it=dumplist.begin(); it<dumplist.end(); ++it)
     {
@@ -291,7 +302,7 @@ void Thermo_dry::exec_dump()
         else
             throw 1;
 
-        model->dump->save_dump(fields->atmp["tmp2"]->data, fields->atmp["tmp1"]->data, *it);
+        model->dump->save_dump(fields->atmp["tmp2"]->data, fields->atmp["tmp1"]->data, *it,iotime);
     }
 }
 
@@ -532,6 +543,18 @@ void Thermo_dry::init_stat()
         stats->add_prof("bflux", "Total flux of the buoyancy", "m2 s-3", "zh");
 
         //stats->add_prof("bsort", "Sorted buoyancy", "m s-2", "z"); ///< Avoid conflict when using budget4
+    }
+}
+
+void Thermo_dry::init_column()
+{
+    // Add variables to the statistics
+    if (model->column->get_switch() == "1")
+    {
+
+        model->column->add_prof("b", "Buoyancy", "m s-2", "z");
+
+        model->column->add_prof("ql", "Liquid water mixing ratio", "kg kg-1", "z");
     }
 }
 

@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -57,7 +57,7 @@ class Boundary
         virtual void set_ghost_cells_w(Boundary_w_type); ///< Update the boundary conditions.
 
         virtual void exec_stats(Mask*); ///< Execute statistics of surface
-        virtual void exec_cross();       ///< Execute cross sections of surface
+        virtual void exec_cross(int);       ///< Execute cross sections of surface
 
         virtual void get_mask(Field3d*, Field3d*, Mask*); ///< Calculate statistics mask
         virtual void get_surface_mask(Field3d*);          ///< Calculate surface mask

@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -30,6 +30,7 @@
 #include "tools.h"
 #include "boundary.h"
 #include "model.h"
+#include "timeloop.h"
 
 using namespace Finite_difference::O2;
 
@@ -168,7 +169,27 @@ namespace
     }
 
     __global__ 
-    void update_time_dependent_prof_g(double* const __restrict__ sls, double* const __restrict__ slstd,
+    void nudging_tendency_g(double* const __restrict__ st, double* const __restrict__ smn,
+			    double* const __restrict__ snudge, double* const __restrict__ nudge_fac,
+                            const int istart, const int jstart, const int kstart,
+                            const int iend,   const int jend,   const int kend,
+                            const int jj,     const int kk)
+    {
+        const int i = blockIdx.x*blockDim.x + threadIdx.x + istart;
+        const int j = blockIdx.y*blockDim.y + threadIdx.y + jstart;
+        const int k = blockIdx.z + kstart;
+
+        if (i < iend && j < jend && k < kend)
+        {
+            const int ijk = i + j*jj + k*kk;
+
+            st[ijk] += - nudge_fac[k] * (smn[k]-snudge[k]);
+
+        }
+    }
+
+    __global__ 
+    void update_time_dependent_prof_g(double* const __restrict__ prof, const double* const __restrict__ data,
                                       const double fac0, const double fac1, 
                                       const int index0,  const int index1, 
                                       const int kmax,    const int kgc)
@@ -177,7 +198,7 @@ namespace
         const int kk = kmax;
 
         if (k < kmax)
-            sls[k+kgc] = fac0*slstd[index0*kk+k] + fac1*slstd[index1*kk+k];
+            prof[k+kgc] = fac0*data[index0*kk+k] + fac1*data[index1*kk+k];
     }
 } // end namespace
 
@@ -192,6 +213,16 @@ void Force::prepare_device()
 
         cuda_safe_call(cudaMemcpy(ug_g, ug, nmemsize, cudaMemcpyHostToDevice));
         cuda_safe_call(cudaMemcpy(vg_g, vg, nmemsize, cudaMemcpyHostToDevice));
+        if (swtimedep_geo == "1")
+        {
+
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_geo.begin(); it!=timedepdata_geo.end(); ++it)
+            {
+                int nmemsize2 = grid->kmax*timedeptime_geo[it->first].size()*sizeof(double);
+                cuda_safe_call(cudaMalloc(&timedepdata_geo_g[it->first], nmemsize2));
+                cuda_safe_call(cudaMemcpy(timedepdata_geo_g[it->first], timedepdata_geo[it->first], nmemsize2, cudaMemcpyHostToDevice));
+            }
+        }
     }
 
     if (swls == "1")
@@ -201,23 +232,49 @@ void Force::prepare_device()
             cuda_safe_call(cudaMalloc(&lsprofs_g[*it], nmemsize));
             cuda_safe_call(cudaMemcpy(lsprofs_g[*it], lsprofs[*it], nmemsize, cudaMemcpyHostToDevice));
         }
+        if (swtimedep_ls == "1")
+        {
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_ls.begin(); it!=timedepdata_ls.end(); ++it)
+            {
+                int nmemsize2 = grid->kmax*timedeptime_ls[it->first].size()*sizeof(double);
+                cuda_safe_call(cudaMalloc(&timedepdata_ls_g[it->first], nmemsize2));
+                cuda_safe_call(cudaMemcpy(timedepdata_ls_g[it->first], timedepdata_ls[it->first], nmemsize2, cudaMemcpyHostToDevice));
+            }
+        }
+    }
+
+    if (swnudge == "1")
+    {
+        for (std::vector<std::string>::const_iterator it=nudgelist.begin(); it!=nudgelist.end(); ++it)
+        {
+            cuda_safe_call(cudaMalloc(&nudgeprofs_g[*it], nmemsize));
+            cuda_safe_call(cudaMemcpy(nudgeprofs_g[*it], nudgeprofs[*it], nmemsize, cudaMemcpyHostToDevice));
+        }
+        cuda_safe_call(cudaMalloc(&nudge_factor_g, nmemsize));
+        cuda_safe_call(cudaMemcpy(nudge_factor_g, nudge_factor, nmemsize, cudaMemcpyHostToDevice));
+        if (swtimedep_nudge == "1")
+        {
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_nudge.begin(); it!=timedepdata_nudge.end(); ++it)
+            {
+                int nmemsize2 = grid->kmax*timedeptime_nudge[it->first].size()*sizeof(double);
+                cuda_safe_call(cudaMalloc(&timedepdata_nudge_g[it->first], nmemsize2));
+                cuda_safe_call(cudaMemcpy(timedepdata_nudge_g[it->first], timedepdata_nudge[it->first], nmemsize2, cudaMemcpyHostToDevice));
+            }
+        }
     }
 
     if (swwls == "1")
     {
         cuda_safe_call(cudaMalloc(&wls_g, nmemsize));
         cuda_safe_call(cudaMemcpy(wls_g, wls, nmemsize, cudaMemcpyHostToDevice));
-    }
-
-    if (swtimedep == "1")
-    {
-        int nmemsize2 = grid->kmax*timedeptime.size()*sizeof(double);
-        for (std::map<std::string, double *>::const_iterator it=timedepdata.begin(); it!=timedepdata.end(); ++it)
+        if (swtimedep_wls == "1")
         {
-            cuda_safe_call(cudaMalloc(&timedepdata_g[it->first], nmemsize2));
-            cuda_safe_call(cudaMemcpy(timedepdata_g[it->first], timedepdata[it->first], nmemsize2, cudaMemcpyHostToDevice));
+            int nmemsize2 = grid->kmax*timedeptime_wls.size()*sizeof(double);
+            cuda_safe_call(cudaMalloc(&timedepdata_wls_g, nmemsize2));
+            cuda_safe_call(cudaMemcpy(timedepdata_wls_g, timedepdata_wls, nmemsize2, cudaMemcpyHostToDevice));
         }
     }
+
 }
 
 void Force::clear_device()
@@ -226,21 +283,43 @@ void Force::clear_device()
     {
         cuda_safe_call(cudaFree(ug_g));
         cuda_safe_call(cudaFree(vg_g));
+        if (swtimedep_geo == "1")
+        {
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_geo.begin(); it!=timedepdata_geo.end(); ++it)
+                cuda_safe_call(cudaFree(timedepdata_geo_g[it->first]));
+        }
     }
 
     if (swls == "1")
     {
         for(std::vector<std::string>::const_iterator it=lslist.begin(); it!=lslist.end(); ++it)
             cuda_safe_call(cudaFree(lsprofs_g[*it]));
+        if (swtimedep_ls == "1")
+        {
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_ls.begin(); it!=timedepdata_ls.end(); ++it)
+                cuda_safe_call(cudaFree(timedepdata_ls_g[it->first]));
+        }
+    }
+
+    if (swnudge == "1")
+    {
+        for(std::vector<std::string>::const_iterator it=nudgelist.begin(); it!=nudgelist.end(); ++it)
+            cuda_safe_call(cudaFree(nudgeprofs_g[*it]));
+        cuda_safe_call(cudaFree(nudge_factor_g));
+        if (swtimedep_nudge == "1")
+        {
+            for (std::map<std::string, double *>::const_iterator it=timedepdata_nudge.begin(); it!=timedepdata_nudge.end(); ++it)
+                cuda_safe_call(cudaFree(timedepdata_nudge_g[it->first]));
+        }
     }
 
     if (swwls == "1")
-        cuda_safe_call(cudaFree(wls_g));
-
-    if (swtimedep == "1")
     {
-        for (std::map<std::string, double *>::const_iterator it=timedepdata.begin(); it!=timedepdata.end(); ++it)
-            cuda_safe_call(cudaFree(timedepdata_g[it->first]));
+        cuda_safe_call(cudaFree(wls_g));
+        if (swtimedep_wls == "1")
+        {
+            cuda_safe_call(cudaFree(timedepdata_wls_g));
+        }
     }
 }
 
@@ -331,6 +410,20 @@ void Force::exec(double dt)
         }
     }
 
+    if (swnudge == "1")
+    {
+        for(std::vector<std::string>::const_iterator it=nudgelist.begin(); it!=nudgelist.end(); ++it)
+        {
+            nudging_tendency_g<<<gridGPU, blockGPU>>>(
+                &fields->at[*it]->data_g[offs],  fields->ap[*it]->datamean_g, 
+                nudgeprofs_g[*it], nudge_factor_g,
+                grid->istart,  grid->jstart, grid->kstart,
+                grid->iend,    grid->jend,   grid->kend,
+                grid->icellsp, grid->ijcellsp);
+            cuda_check_error();
+        }
+    } 
+    
     if (swwls == "1")
     {
         for (FieldMap::iterator it = fields->st.begin(); it!=fields->st.end(); it++)
@@ -347,23 +440,51 @@ void Force::exec(double dt)
 #endif
 
 #ifdef USECUDA
-void Force::update_time_dependent_profs(double fac0, double fac1, int index0, int index1)
+void Force::update_time_dependent_profs(std::map<std::string, double*>& profiles, std::map<std::string, double*> time_profiles,
+                                        std::map<std::string, std::vector<double>> times, std::string suffix)
 {
     const int blockk = 128;
     const int gridk  = grid->kmax/blockk + (grid->kmax%blockk > 0);
 
-    for (std::vector<std::string>::const_iterator it1=lslist.begin(); it1!=lslist.end(); ++it1)
+    // Loop over all profiles which might be time dependent
+    for (auto& it : profiles)
     {
-        std::string name = *it1 + "ls";
-        std::map<std::string, double *>::const_iterator it2 = timedepdata_g.find(name);
+        std::string name = it.first + suffix;
 
-        // update the profile
-        if (it2 != timedepdata.end())
+        // Check if they have time dependent data
+        if (time_profiles.find(name) != time_profiles.end())
         {
+            // Get/calculate the interpolation indexes/factors
+            int index0, index1;
+            double fac0, fac1;
+
+            model->timeloop->get_interpolation_factors(index0, index1, fac0, fac1, times[name]);
+
+            // Calculate the new vertical profile
             update_time_dependent_prof_g<<<gridk, blockk>>>(
-                lsprofs_g[*it1], it2->second, fac0, fac1, index0, index1, grid->kmax, grid->kgc);
+                it.second, time_profiles[name], fac0, fac1, index0, index1, grid->kmax, grid->kgc);
             cuda_check_error();
         }
     }
+
+}
+#endif
+
+#ifdef USECUDA
+void Force::update_time_dependent_prof(double* const prof, const double* const data, std::vector<double> times)
+{
+    const int blockk = 128;
+    const int gridk  = grid->kmax/blockk + (grid->kmax%blockk > 0);
+
+    int index0, index1;
+    double fac0, fac1;
+
+    model->timeloop->get_interpolation_factors(index0, index1, fac0, fac1, times);
+
+    // Calculate the new vertical profile
+    update_time_dependent_prof_g<<<gridk, blockk>>>(
+        prof, data, fac0, fac1, index0, index1, grid->kmax, grid->kgc);
+    cuda_check_error();
+
 }
 #endif

@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -42,7 +42,7 @@ class Boundary_surface : public Boundary
         virtual void set_values();
 
         void exec_stats(Mask*); ///< Execute statistics of surface
-        void exec_cross();      ///< Execute cross sections of surface
+        void exec_cross(int);      ///< Execute cross sections of surface
 
         // Make these variables public for out-of-class usage.
         double* obuk;

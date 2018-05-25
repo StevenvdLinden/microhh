@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -48,8 +48,9 @@ class Thermo_dry : public Thermo
         unsigned long get_time_limit(unsigned long, double); ///< Compute the time limit (n/a for thermo_dry)
 
         void exec_stats(Mask*);
-        void exec_cross();
-        void exec_dump();
+        void exec_cross(int);
+        void exec_dump(int);
+        void exec_column();
 
         bool check_field_exists(std::string name);
         void get_thermo_field(Field3d*, Field3d*, std::string name, bool cyclic);
@@ -62,16 +63,20 @@ class Thermo_dry : public Thermo
         // GPU functions and variables
         void prepare_device();
         void clear_device();
+        void forward_device();
+        void backward_device();
 #endif
 
         // Empty functions that are allowed to pass.
         void get_mask(Field3d*, Field3d*, Mask*) {}
+        void update_time_dependent() {}
 
     private:
         void init_stat();  ///< Initialize the thermo statistics
         void init_cross(); ///< Initialize the thermo cross-sections
         void init_dump();  ///< Initialize the thermo field dumps
-
+        void init_column();  ///< Initialize the thermo column dumps
+        
         void calc_buoyancy(double *, double *, double *);     ///< Calculation of the buoyancy.
         void calc_N2(double *, double *, double *, double *); ///< Calculation of the Brunt-Vaissala frequency.
         void calc_absolute_temperature(double *, const double *, const double *); ///< Calculation of the absolute temperature.

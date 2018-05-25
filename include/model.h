@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -24,6 +24,7 @@
 #define MODEL
 
 #include <string>
+#include <thread>
 
 class Master;
 class Input;
@@ -41,6 +42,7 @@ class Buffer;
 class Stats;
 class Cross;
 class Dump;
+class Column;
 class Budget;
 
 class Model
@@ -77,15 +79,20 @@ class Model
         Cross*  cross;
         Dump*   dump;
         Budget* budget;
+        Column* column;
 
     private:
         // list of masks for statistics
         std::vector<std::string> masklist;
+        #ifdef USECUDA
+        std::thread t_stat;
+        #endif
 
         void delete_objects();
 
         void print_status();
         void calc_stats(std::string);
         void set_time_step();
+        void do_stat(bool doStats, bool doCross, bool doDump, bool doColumn, int iteration, double time, unsigned long itime, int iotime);
 };
 #endif

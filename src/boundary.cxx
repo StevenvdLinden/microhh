@@ -1,8 +1,8 @@
 /*
  * MicroHH
- * Copyright (c) 2011-2015 Chiel van Heerwaarden
- * Copyright (c) 2011-2015 Thijs Heus
- * Copyright (c) 2014-2015 Bart van Stratum
+ * Copyright (c) 2011-2017 Chiel van Heerwaarden
+ * Copyright (c) 2011-2017 Thijs Heus
+ * Copyright (c) 2014-2017 Bart van Stratum
  *
  * This file is part of MicroHH
  *
@@ -262,11 +262,11 @@ void Boundary::update_time_dependent()
             // BvS: for now branched here; seems a bit wasteful to copy the entire settimedep to boundary.cu?
             const double noOffset = 0.;
 
-#ifndef USECUDA
+            #ifndef USECUDA
             set_bc(it1->second->databot, it1->second->datagradbot, it1->second->datafluxbot, sbc[it1->first]->bcbot, sbc[it1->first]->bot, it1->second->visc, noOffset);
-#else
+            #else
             set_bc_g(it1->second->databot_g, it1->second->datagradbot_g, it1->second->datafluxbot_g, sbc[it1->first]->bcbot, sbc[it1->first]->bot, it1->second->visc, noOffset);
-#endif
+            #endif
         }
     }
 }
@@ -356,7 +356,7 @@ void Boundary::set_ghost_cells_w(const Boundary_w_type boundary_w_type)
 }
 #endif
 
-void Boundary::exec_cross()
+void Boundary::exec_cross(int iotime)
 {
 }
 
