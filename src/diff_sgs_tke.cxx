@@ -39,6 +39,7 @@
 #include "thermo.h"
 #include "model.h"
 #include "monin_obukhov.h"
+#include "stats.h"
 
 #include "advec.h"
 
@@ -75,8 +76,8 @@ Diff_sgs_tke::~Diff_sgs_tke()
 
 void Diff_sgs_tke::set_values() // this is probably the ugliest solution, there is no create function for the diffusion class, so just initialise stats here ...
 {
-    //if (model->thermo->get_switch() != "0")
-        //init_stats();
+    if (model->thermo->get_switch() != "0")
+        init_stats();
 }
 
 #ifndef USECUDA
@@ -119,23 +120,6 @@ void Diff_sgs_tke::exec_viscosity()
 {
     // Do a cast because the base boundary class does not have the MOST related variables.
     Boundary_surface* boundaryptr = static_cast<Boundary_surface*>(model->boundary);
-
-    // NOOT : zover ik nu zie, is dit in zijn geheel niet nodig voor berekening van de viscositeiten
-
-    // // Calculate strain rate using MO for velocity gradients lowest level
-    // if (model->boundary->get_switch() == "surface")
-    //     calc_strain2<false>(fields->sd["evisc"]->data,
-    //                         fields->u->data, fields->v->data, fields->w->data,
-    //                         fields->u->datafluxbot, fields->v->datafluxbot,
-    //                         boundaryptr->ustar, boundaryptr->obuk,
-    //                         grid->z, grid->dzi, grid->dzhi);
-    // // Calculate strain rate using resolved boundaries
-    // else
-    //     calc_strain2<true>(fields->sd["evisc"]->data,
-    //                        fields->u->data, fields->v->data, fields->w->data,
-    //                        fields->u->datafluxbot, fields->v->datafluxbot,
-    //                        NULL, NULL, // BvS, for now....
-    //                        grid->z, grid->dzi, grid->dzhi);
 
     // start with retrieving the stability information
     if (model->thermo->get_switch() == "0")
@@ -193,7 +177,6 @@ void Diff_sgs_tke::exec()
     double* N2 = fields->atmp["tmp1"]->data;
 
     // Do calculation in this order so temp1 'can be recycled'; SvdLinden, May 2018
-    std::printf("Correctly stepped into exec\n");
     // Calculate strain rate squared for use in SGS TKE production and store in tmp1
     if (model->boundary->get_switch() == "surface")
         calc_strain2<false>(S2,
@@ -209,20 +192,20 @@ void Diff_sgs_tke::exec()
                            NULL, NULL, // BvS, for now....
                            grid->z, grid->dzi, grid->dzhi);
 
-    // calc_sgs_tke_shear_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["evisc"]->data, S2);
+    calc_sgs_tke_shear_tend_2nd(fields->st["sgs_tke"]->data, fields->sd["evisc"]->data, S2);
 
-    // Retrieve buoyancy field for use in SGS TKE production and store in tmp1
-    // these functions have been exactly copied from the exec_viscosity()-function above
-    // store the buoyancyflux in tmp1 (NOOT: WAAROM DEZE STAP?)
+    //Retrieve buoyancy field for use in SGS TKE production and store in tmp1
+    //these functions have been exactly copied from the exec_viscosity()-function above
+    //store the buoyancyflux in tmp1 (NOOT: WAAROM DEZE STAP?)
     model->thermo->get_buoyancy_fluxbot(fields->atmp["tmp1"]);
-    // retrieve the full field in tmp1 and use tmp2 for temporary calculations
+    //retrieve the full field in tmp1 and use tmp2 for temporary calculations
     model->thermo->get_thermo_field(fields->atmp["tmp1"], fields->atmp["tmp2"], "N2", false);
-    std::printf("correctly got strain2 and thermo fields\n");
+
     calc_sgs_tke_buoyancy_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, fields->sd["evisc"]->data, N2,
-                                  grid->dz);
+                                 grid->dz);
     calc_sgs_tke_dissipation_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, N2,
-                                grid->dz);
-    std::printf("correctly calculated buoyance tendency and dissipation\n");
+                                 grid->dz);
+
     if(model->boundary->get_switch() == "surface")
     {
         diff_u<false>(fields->ut->data, fields->u->data, fields->v->data, fields->w->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
@@ -240,13 +223,11 @@ void Diff_sgs_tke::exec()
             {
                 diff_sgs_tke<false>(it->second->data, fields->sp[it->first]->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
                              fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
-                std::printf("correctly did diffustion of SGS TKE\n");
             }
             else
             {
                 diff_c<false>(it->second->data, fields->sp[it->first]->data, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
                       fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
-                std::printf("correctly did diffustion of %s\n",it->second->name.c_str());
             }
         }
     }
@@ -275,7 +256,6 @@ void Diff_sgs_tke::exec()
             }
         }
     }
-
 }
 #endif
 
@@ -424,6 +404,7 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
 
     // NOOT: in DALES wordt K = cm*lambda*sqrt(e) ook gebruikt voor eerste gridpunt boven de bodem (gewoon gekopieerd hier)
 
+    // NOOT: Dit is een rare setup? Wanneer je bij gebruikt MOST OOK mvisc zou optellen, kan dit ingekort worden?
     if(resolved_wall)
     {
         for (int k=grid->kstart; k<grid->kend; ++k)
@@ -436,8 +417,10 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
+
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
-                    mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                    mlen  = mlen0;
+                    if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
                     evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc;
                 }
@@ -471,10 +454,12 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
+
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
-                    mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                    mlen  = mlen0;
+                    if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
-                    evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc;
+                    evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc; // For now, do not add molecular viscosity
                 }
         }
 
@@ -514,7 +499,9 @@ void Diff_sgs_tke::calc_evisc_neutral(double* restrict evisc,
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
+
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
+                    // NOOT: HIER NOG EEN FIX PLAATSEN: welke lengteschaal hier gebruiken
                     mlen = cn * std::sqrt(sgstke[ijk]);
                     fac  = std::min(mlen0, mlen);
                     // NOOT : waarom wordt hier expliciet molecular viscosity bij opgeteld? En niet bijvoorbeeld bij standaard calc_evisc?
@@ -550,7 +537,9 @@ void Diff_sgs_tke::calc_evisc_neutral(double* restrict evisc,
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
+
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
+                    // NOOT: HIER NOG EEN FIX PLAATSEN: welke lengteschaal hier gebruiken
                     mlen = cn * std::sqrt(sgstke[ijk]);
                     fac  = std::min(mlen0, mlen);
                     // NOOT : waarom wordt hier dan NIET expliciet molecular viscosity bij opgeteld?
@@ -829,7 +818,8 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen0 = std::pow(dx*dy*dz[kstart], 1./3.);
 
                 // Calculate turbulent length scale based on Deardorff, 1980
-                mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                mlen  = mlen0;
+                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
@@ -863,7 +853,8 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen0 = std::pow(dx*dy*dz[kend-1], 1./3.);
 
                 // Calculate turbulent length scale based on Deardorff, 1980
-                mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                mlen  = mlen0;
+                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
@@ -897,9 +888,9 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen0 = std::pow(dx*dy*dz[k], 1./3.);
 
                 // Calculate turbulent length scale based on Deardorff, 1980
-                mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                mlen  = mlen0;
+                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
 
@@ -989,8 +980,7 @@ void Diff_sgs_tke::diff_sgs_tke(double* restrict sgstket, double* restrict sgstk
                              + ( - rhorefh[kend-1] * eviscb*(sgstke[ijk   ]-sgstke[ijk-kk])*dzhi[kend-1] ) / rhoref[kend-1] * dzi[kend-1];
                              // NOOT: voor nu ervoor gekozen om diffusie door top via fluxtop weg te halen
                              //+ (-rhorefh[kend  ] * fluxtop[ij]
-                            //   - rhorefh[kend-1] * eviscb*(sgstke[ijk   ]-sgstke[ijk-kk])*dzhi[kend-1] ) / rhoref[kend-1] * dzi[kend-1];
-            }
+                            //   - rhorefh[kend-1] * eviscb*(sgstke[ijk   ]-sgstke[ijk-kk])*dzhi[kend-1] ) / rhoref[kend-1] * dzi[kend-1];            }
 
     }
 
@@ -1074,7 +1064,8 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
                 const int ijk = i + j*jj + k*kk;
 
                 // Calculate turbulent length scale based on Deardorff, 1980
-                mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                mlen  = mlen0;
+                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
@@ -1117,11 +1108,21 @@ void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double
             for (int i=grid->istart; i<grid->iend; ++i)
             {
                 const int ijk = i + j*jj + k*kk;
+
                 // Calculate dissipation of TKE based on Deardorff, 1980
-                mlen         = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
-                fac          = std::min(mlen0, mlen);
+                mlen  = mlen0;
+                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                fac  = std::min(mlen0, mlen);
+
                 ce           = ce1 + ce2 * fac / mlen0;
                 sgstket[ijk] = -1 * ce * std::pow(sgstke[ijk], 3./2.) / fac;
+                // NOOT: Natuurlijk tijdelijk, SvdLinden, June 2018
+                if(sgstket[ijk]!=sgstket[ijk])
+                {
+                  std::printf("sgs-tke_t: %f, en sgs-tke %f op hoogte %d met fac = %f, mlen0 = %f, ce = %f\n",sgstket[ijk],sgstke[ijk],k,fac,mlen0,ce);
+                  std::printf("mlen = %f, en N2 = %f\n",mlen,N2[ijk]);
+                  throw 1;
+                }
             }
     }
 }
@@ -1194,8 +1195,8 @@ void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstk
               {
                   const int ijk = i + j*jj + k*kk;
 
-                  // Calculate turbulent length scale based on Deardorff, 1980
-                  mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                  mlen  = mlen0;
+                  if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                   fac  = std::min(mlen0, mlen);
 
                   // Calculate the stability dependent turbulent Prandtl number
@@ -1229,7 +1230,7 @@ void Diff_sgs_tke::exec_stats(Mask *m)
         model->thermo->get_thermo_field(fields->atmp["tmp1"], fields->atmp["tmp2"], "N2", false);
 
         // recalculate stability dependent turbulent Prandtl number and store in tmp2
-        calc_prandtl(fields->atmp["tmp2"]->data, fields->sp["sgstke"]->data, fields->atmp["tmp1"]->data, grid->dz);
+        calc_prandtl(fields->atmp["tmp2"]->data, fields->sp["sgs_tke"]->data, fields->atmp["tmp1"]->data, grid->dz);
 
         // calculate the mean, standard mask is always stored in tmp3 (see model.cxx)
         model->stats->calc_mean(m->profs["tPr"].data, fields->atmp["tmp2"]->data, NoOffset, sloc,

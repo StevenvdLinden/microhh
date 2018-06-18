@@ -33,6 +33,7 @@
 #include "thermo.h"
 #include "model.h"
 #include "monin_obukhov.h"
+#include "stats.h"
 
 namespace
 {
@@ -176,7 +177,7 @@ void Diff_smag_2::exec()
 }
 #endif
 
-template <bool resolved_wall> 
+template <bool resolved_wall>
 void Diff_smag_2::calc_strain2(double* restrict strain2,
                                double* restrict u, double* restrict v, double* restrict w,
                                double* restrict ufluxbot, double* restrict vfluxbot,
@@ -434,7 +435,7 @@ void Diff_smag_2::diff_u(double* restrict ut, double* restrict u, double* restri
     double eviscn, eviscs, eviscb, evisct;
 
     const int k_offset = resolved_wall ? 0 : 1;
-   
+
     if(!resolved_wall)
     {
         // bottom boundary
@@ -637,7 +638,7 @@ void Diff_smag_2::diff_w(double* restrict wt, double* restrict u, double* restri
 
 void Diff_smag_2::diff_c(double* restrict at, double* restrict a,
                          double* restrict dzi, double* restrict dzhi, double* restrict evisc,
-                         double* restrict fluxbot, double* restrict fluxtop, 
+                         double* restrict fluxbot, double* restrict fluxtop,
                          double* restrict rhoref, double* restrict rhorefh, double tPr)
 {
     const int ii = 1;
@@ -666,9 +667,9 @@ void Diff_smag_2::diff_c(double* restrict at, double* restrict a,
             eviscb = 0.5*(evisc[ijk-kk]+evisc[ijk   ])/tPr;
 
             at[ijk] +=
-                     + ( evisce*(a[ijk+ii]-a[ijk   ]) 
-                       - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi 
-                     + ( eviscn*(a[ijk+jj]-a[ijk   ]) 
+                     + ( evisce*(a[ijk+ii]-a[ijk   ])
+                       - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi
+                     + ( eviscn*(a[ijk+jj]-a[ijk   ])
                        - eviscs*(a[ijk   ]-a[ijk-jj]) ) * dyidyi
                      + ( rhorefh[kstart+1] * evisct*(a[ijk+kk]-a[ijk   ])*dzhi[kstart+1]
                        + rhorefh[kstart  ] * fluxbot[ij] ) / rhoref[kstart] * dzi[kstart];
@@ -688,9 +689,9 @@ void Diff_smag_2::diff_c(double* restrict at, double* restrict a,
                 eviscb = 0.5*(evisc[ijk-kk]+evisc[ijk   ])/tPr;
 
                 at[ijk] +=
-                         + ( evisce*(a[ijk+ii]-a[ijk   ]) 
-                           - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi 
-                         + ( eviscn*(a[ijk+jj]-a[ijk   ]) 
+                         + ( evisce*(a[ijk+ii]-a[ijk   ])
+                           - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi
+                         + ( eviscn*(a[ijk+jj]-a[ijk   ])
                            - eviscs*(a[ijk   ]-a[ijk-jj]) ) * dyidyi
                          + ( rhorefh[k+1] * evisct*(a[ijk+kk]-a[ijk   ])*dzhi[k+1]
                            - rhorefh[k  ] * eviscb*(a[ijk   ]-a[ijk-kk])*dzhi[k]  ) / rhoref[k] * dzi[k];
@@ -711,9 +712,9 @@ void Diff_smag_2::diff_c(double* restrict at, double* restrict a,
             eviscb = 0.5*(evisc[ijk-kk]+evisc[ijk   ])/tPr;
 
             at[ijk] +=
-                     + ( evisce*(a[ijk+ii]-a[ijk   ]) 
-                       - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi 
-                     + ( eviscn*(a[ijk+jj]-a[ijk   ]) 
+                     + ( evisce*(a[ijk+ii]-a[ijk   ])
+                       - eviscw*(a[ijk   ]-a[ijk-ii]) ) * dxidxi
+                     + ( eviscn*(a[ijk+jj]-a[ijk   ])
                        - eviscs*(a[ijk   ]-a[ijk-jj]) ) * dyidyi
                      + (-rhorefh[kend  ] * fluxtop[ij]
                        - rhorefh[kend-1] * eviscb*(a[ijk   ]-a[ijk-kk])*dzhi[kend-1] ) / rhoref[kend-1] * dzi[kend-1];
@@ -745,3 +746,8 @@ double Diff_smag_2::calc_dnmul(double* restrict evisc, double* restrict dzi, dou
 
     return dnmul;
 }
+
+// void Diff_smag_2::exec_stats(Mask *m)
+// {
+//
+// }

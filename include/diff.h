@@ -28,6 +28,8 @@ class Model;
 class Grid;
 class Fields;
 class Master;
+class Stats;
+struct Mask;
 
 class Diff
 {
@@ -42,12 +44,12 @@ class Diff
         virtual void set_values() = 0;
         virtual void exec_viscosity() = 0;
         virtual void exec() = 0;
+        virtual void exec_stats(Mask*) = 0;
 
         virtual unsigned long get_time_limit(unsigned long, double) = 0;
         virtual double get_dn(double) = 0;
 
         // Empty function that are allowed to pass
-        virtual void exec_stats(Mask*) = 0;
 
         #ifdef USECUDA
         // GPU functions and variables
@@ -59,6 +61,7 @@ class Diff
         Grid*   grid;
         Fields* fields;
         Master* master;
+        Stats*  stats;
 
         std::string swdiff;
 

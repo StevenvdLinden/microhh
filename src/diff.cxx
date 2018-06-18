@@ -29,6 +29,8 @@
 #include "defines.h"
 #include "constants.h"
 #include "model.h"
+#include "stats.h"
+
 // Moet hier ook al advection zichtbaar zijn? En automatisch ook derived class
 //#include "advec.h"
 

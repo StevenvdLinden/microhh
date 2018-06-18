@@ -748,3 +748,8 @@ double Diff_scm::calc_dnmul(double* restrict evisc, double* restrict dzi, double
 
     return dnmul;
 }
+
+// void Diff_scm::exec_stats(Mask *m)
+// {
+//
+// }

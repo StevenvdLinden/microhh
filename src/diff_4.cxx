@@ -30,6 +30,7 @@
 #include "defines.h"
 #include "finite_difference.h"
 #include "model.h"
+#include "stats.h"
 
 using namespace Finite_difference::O4;
 
@@ -67,7 +68,7 @@ double Diff_4::get_dn(double dt)
 #ifndef USECUDA
 void Diff_4::exec()
 {
-    // In case of a two-dimensional run, strip v component out of all kernels and do 
+    // In case of a two-dimensional run, strip v component out of all kernels and do
     // not calculate v-diffusion tendency.
     if (grid->jtot == 1)
     {
@@ -224,3 +225,8 @@ void Diff_4::diff_w(double* restrict at, double* restrict a, double* restrict dz
                             * dzhi4[kend-1];
         }
 }
+
+// void Diff_4::exec_stats(Mask *m)
+// {
+//
+// }

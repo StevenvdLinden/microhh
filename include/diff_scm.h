@@ -33,6 +33,7 @@ class Diff_scm : public Diff
 
         void exec();
         void exec_viscosity();
+        //void exec_stats(Mask*);
 
         unsigned long get_time_limit(unsigned long, double);
         double get_dn(double);

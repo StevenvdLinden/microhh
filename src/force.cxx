@@ -626,13 +626,15 @@ void Force::exec_stats(Mask *m)
     // define the location
     const int sloc[] = {0,0,0};
 
-    for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
+    if (swwls == "1")
     {
-        // Get name from FieldMap and unit
-        std::string wls_fldname  = it->second->name + "t_wls";
+        for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
+        {
+            // Get name from FieldMap and unit
+            std::string wls_fldname  = it->second->name + "t_wls";
 
-        advec_wls_2nd_forstat(st_wls, fields->sp[it->first]->datamean, wls, grid->dzhi);
-        model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
+            advec_wls_2nd_forstat(st_wls, fields->sp[it->first]->datamean, wls, grid->dzhi);
+            model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
+        }
     }
-
 }

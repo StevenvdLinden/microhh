@@ -283,6 +283,8 @@ void Boundary::set_values()
 
     for (FieldMap::const_iterator it=fields->sp.begin(); it!=fields->sp.end(); ++it)
     {
+        //if(it->second->name.c_str()== "sgs_tke") std::printf("Ja, deze functies worden aangeroepen, regular boundary\n");
+        //std::printf("Hij komt hier uberhaupt, regular boundary\n");
         set_bc(it->second->databot, it->second->datagradbot, it->second->datafluxbot, sbc[it->first]->bcbot, sbc[it->first]->bot, it->second->visc, noOffset);
         set_bc(it->second->datatop, it->second->datagradtop, it->second->datafluxtop, sbc[it->first]->bctop, sbc[it->first]->top, it->second->visc, noOffset);
     }

@@ -29,6 +29,7 @@
 #include "diff_2.h"
 #include "defines.h"
 #include "model.h"
+#include "stats.h"
 
 Diff_2::Diff_2(Model* modelin, Input* inputin) : Diff(modelin, inputin)
 {
@@ -89,9 +90,9 @@ void Diff_2::diff_c(double* restrict at, double* restrict a, double* restrict dz
             {
                 const int ijk = i + j*jj + k*kk;
                 at[ijk] += visc * (
-                        + ( (a[ijk+ii] - a[ijk   ]) 
-                          - (a[ijk   ] - a[ijk-ii]) ) * dxidxi 
-                        + ( (a[ijk+jj] - a[ijk   ]) 
+                        + ( (a[ijk+ii] - a[ijk   ])
+                          - (a[ijk   ] - a[ijk-ii]) ) * dxidxi
+                        + ( (a[ijk+jj] - a[ijk   ])
                           - (a[ijk   ] - a[ijk-jj]) ) * dyidyi
                         + ( (a[ijk+kk] - a[ijk   ]) * dzhi[k+1]
                           - (a[ijk   ] - a[ijk-kk]) * dzhi[k]   ) * dzi[k] );
@@ -114,11 +115,16 @@ void Diff_2::diff_w(double* restrict wt, double* restrict w, double* restrict dz
             {
                 const int ijk = i + j*jj + k*kk;
                 wt[ijk] += visc * (
-                        + ( (w[ijk+ii] - w[ijk   ]) 
-                          - (w[ijk   ] - w[ijk-ii]) ) * dxidxi 
-                        + ( (w[ijk+jj] - w[ijk   ]) 
+                        + ( (w[ijk+ii] - w[ijk   ])
+                          - (w[ijk   ] - w[ijk-ii]) ) * dxidxi
+                        + ( (w[ijk+jj] - w[ijk   ])
                           - (w[ijk   ] - w[ijk-jj]) ) * dyidyi
                         + ( (w[ijk+kk] - w[ijk   ]) * dzi[k]
                           - (w[ijk   ] - w[ijk-kk]) * dzi[k-1] ) * dzhi[k] );
             }
 }
+
+// void Diff_2::exec_stats(Mask *m)
+// {
+// 
+// }

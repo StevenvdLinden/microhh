@@ -167,7 +167,7 @@ void Boundary_surface::process_input(Input *inputin)
     nerror += inputin->get_list(&crosslist , "boundary", "crosslist" , "");
 
     // Get global cross-list from cross.cxx
-    std::vector<std::string> *crosslist_global = model->cross->get_crosslist(); 
+    std::vector<std::string> *crosslist_global = model->cross->get_crosslist();
 
     // Check input list of cross variables (crosslist)
     std::vector<std::string>::iterator it2=crosslist_global->begin();
@@ -215,7 +215,7 @@ void Boundary_surface::exec_cross(int iotime)
             nerror += model->cross->cross_plane(ustar, fields->atmp["tmp1"]->data, "ustar",iotime);
         else if (*it == "obuk")
             nerror += model->cross->cross_plane(obuk,  fields->atmp["tmp1"]->data, "obuk",iotime);
-    }  
+    }
 
     if (nerror)
         throw 1;
@@ -240,6 +240,7 @@ void Boundary_surface::set_values()
 
     for (FieldMap::const_iterator it=fields->sp.begin(); it!=fields->sp.end(); ++it)
     {
+        if(it->second->name.c_str()== "sgs_tke")
         set_bc(it->second->databot, it->second->datagradbot, it->second->datafluxbot, sbc[it->first]->bcbot, sbc[it->first]->bot, it->second->visc, no_offset);
         set_bc(it->second->datatop, it->second->datagradtop, it->second->datafluxtop, sbc[it->first]->bctop, sbc[it->first]->top, it->second->visc, no_offset);
     }
@@ -366,7 +367,7 @@ void Boundary_surface::update_bcs()
 
 void Boundary_surface::update_slave_bcs()
 {
-    // This function does nothing when the surface model is enabled, because 
+    // This function does nothing when the surface model is enabled, because
     // the fields are computed by the surface model in update_bcs.
 }
 
@@ -508,9 +509,9 @@ void Boundary_surface::stability_neutral(double* restrict ustar, double* restric
     }
 }
 
-void Boundary_surface::surfm(double* restrict ustar, double* restrict obuk, 
-                             double* restrict u, double* restrict ubot, double* restrict ugradbot, double* restrict ufluxbot, 
-                             double* restrict v, double* restrict vbot, double* restrict vgradbot, double* restrict vfluxbot, 
+void Boundary_surface::surfm(double* restrict ustar, double* restrict obuk,
+                             double* restrict u, double* restrict ubot, double* restrict ugradbot, double* restrict ufluxbot,
+                             double* restrict v, double* restrict vbot, double* restrict vgradbot, double* restrict vfluxbot,
                              double zsl, int bcbot)
 {
     const int ii = 1;
@@ -604,7 +605,7 @@ ijk = i + j*jj + kstart*kk;
 }
 
 void Boundary_surface::surfs(double* restrict ustar, double* restrict obuk, double* restrict var,
-                             double* restrict varbot, double* restrict vargradbot, double* restrict varfluxbot, 
+                             double* restrict varbot, double* restrict vargradbot, double* restrict varfluxbot,
                              double zsl, int bcbot)
 {
     const int jj = grid->icells;

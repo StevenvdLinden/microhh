@@ -257,19 +257,16 @@ void Model::exec()
     boundary->update_time_dependent();
     force   ->update_time_dependent();
     thermo  ->update_time_dependent();
+    //std:printf("Time dep params geupdated\n");
 
     // Set the boundary conditions.
     boundary->exec();
-
     // Calculate the field means, in case needed.
     fields->exec();
-
     // Get the viscosity to be used in diffusion.
     diff->exec_viscosity();
-
     // Set the time step.
     set_time_step();
-
     // Print the initial status information.
     print_status();
 
@@ -286,7 +283,6 @@ void Model::exec()
 
         // Calculate the diffusion tendency.
         diff->exec();
-
         // Calculate the thermodynamics and the buoyancy tendency.
         thermo->exec();
 
@@ -303,7 +299,6 @@ void Model::exec()
         boundary->set_ghost_cells_w(Boundary::Conservation_type);
         pres->exec(timeloop->get_sub_time_step());
         boundary->set_ghost_cells_w(Boundary::Normal_type);
-
         // Allow only for statistics when not in substep and not directly after restart.
         if (timeloop->is_stats_step())
         {
@@ -373,16 +368,12 @@ void Model::exec()
         boundary->update_time_dependent();
         force   ->update_time_dependent();
         thermo  ->update_time_dependent();
-
         // Set the boundary conditions.
         boundary->exec();
-
         // Calculate the field means, in case needed.
         fields->exec();
-
         // Get the viscosity to be used in diffusion.
         diff->exec_viscosity();
-
         // Write status information to disk.
         print_status();
 

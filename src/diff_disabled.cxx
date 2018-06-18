@@ -29,6 +29,7 @@
 #include "defines.h"
 #include "constants.h"
 #include "model.h"
+#include "stats.h"
 
 // diffusion schemes
 #include "diff.h"
@@ -36,6 +37,7 @@
 #include "diff_2.h"
 #include "diff_4.h"
 #include "diff_smag2.h"
+#include "diff_sgs_tke.h"
 
 Diff_disabled::Diff_disabled(Model* modelin, Input* inputin) : Diff(modelin, inputin)
 {
@@ -66,3 +68,7 @@ double Diff_disabled::get_dn(const double dt)
 {
     return Constants::dsmall;
 }
+
+// void Diff_disabled::exec_stats(Mask* m)
+// {
+// }
