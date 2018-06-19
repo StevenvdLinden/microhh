@@ -89,6 +89,7 @@ class Diff_sgs_tke : public Diff
 
         void init_stats(); ///< initialize additional statistiscs
         void calc_prandtl(double*, double*, double*, double*);
+        void set_minimum_sgs_tke(double*); ///< enforce minimum value of SGS TKE
 
         double cs;
 
@@ -114,6 +115,8 @@ class Diff_sgs_tke : public Diff
         const double ch1 = 1.0;
         const double ch2 = 2.0;
         const double cn  = 0.76;
+
+        const double sgstkemin = 1e-9; // minimum value of SGS TKE to prevent model crash 
 
         #ifdef USECUDA
         double* mlen_g;

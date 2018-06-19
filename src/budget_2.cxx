@@ -206,7 +206,7 @@ void Budget_2::exec_stats(Mask* m)
                                      m->profs["u2_diss"].data, m->profs["v2_diss"].data, m->profs["w2_diss"].data, m->profs["tke_diss"].data, m->profs["uw_diss"].data,
                                      fields.atmp["tmp1"]->data, fields.atmp["tmp2"]->data, fields.atmp["tmp3"]->data, fields.u->data, fields.v->data, fields.w->data, umodel, vmodel,
                                      grid.dzi, grid.dzhi, grid.dxi, grid.dyi, fields.visc);
-        else if(diff.get_switch() == "smag2")
+        else if(diff.get_switch() == "smag2" || diff.get_switch() == "sgs_tke")
             calc_diffusion_terms_LES(m->profs["u2_diss"].data,  m->profs["v2_diss"].data, m->profs["w2_diss"].data,
                                      m->profs["tke_diss"].data, m->profs["uw_diss"].data, m->profs["vw_diss"].data,
                                      m->profs["u2_visc"].data,  m->profs["v2_visc"].data, m->profs["w2_visc"].data,

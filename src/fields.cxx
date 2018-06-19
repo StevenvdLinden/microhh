@@ -36,6 +36,7 @@
 #include "cross.h"
 #include "dump.h"
 #include "diff_smag2.h"
+#include "diff_sgs_tke.h"
 
 Fields::Fields(Model *modelin, Input *inputin)
 {
@@ -142,7 +143,7 @@ void Fields::init()
     // set the convenience pointers
     stats  = model->stats;
     column = model->column;
-    
+
     int nerror = 0;
 
     // ALLOCATE ALL THE FIELDS
@@ -448,7 +449,7 @@ void Fields::exec_stats(Mask *m)
         stats->calc_flux_2nd(u->data, umodel, w->data, m->profs["w"].data,
                             m->profs["uw"].data, atmp["tmp2"]->data, uloc,
                             atmp["tmp1"]->data, stats->nmaskh);
-        if (model->diff->get_switch() == "smag2")
+        if (model->diff->get_switch() == "smag2" || model->diff->get_switch() == "sgs_tke")
             stats->calc_diff_2nd(u->data, w->data, sd["evisc"]->data,
                                 m->profs["udiff"].data, grid->dzhi,
                                 u->datafluxbot, u->datafluxtop, 1., uloc,
@@ -490,7 +491,7 @@ void Fields::exec_stats(Mask *m)
         stats->calc_flux_2nd(v->data, vmodel, w->data, m->profs["w"].data,
                             m->profs["vw"].data, atmp["tmp2"]->data, vloc,
                             atmp["tmp1"]->data, stats->nmaskh);
-        if (model->diff->get_switch() == "smag2")
+        if (model->diff->get_switch() == "smag2" || model->diff->get_switch() == "sgs_tke" )
             stats->calc_diff_2nd(v->data, w->data, sd["evisc"]->data,
                                 m->profs["vdiff"].data, grid->dzhi,
                                 v->datafluxbot, v->datafluxtop, 1., vloc,
@@ -530,7 +531,7 @@ void Fields::exec_stats(Mask *m)
             stats->calc_flux_2nd(it->second->data, m->profs[it->first].data, w->data, m->profs["w"].data,
                                 m->profs[it->first+"w"].data, atmp["tmp1"]->data, sloc,
                                 atmp["tmp4"]->data, stats->nmaskh);
-            if (model->diff->get_switch() == "smag2")
+            if (model->diff->get_switch() == "smag2" || model->diff->get_switch() == "sgs_tke")
                 stats->calc_diff_2nd(it->second->data, w->data, sd["evisc"]->data,
                                     m->profs[it->first+"diff"].data, grid->dzhi,
                                     it->second->datafluxbot, it->second->datafluxtop, diffptr->tPr, sloc,
@@ -576,7 +577,7 @@ void Fields::exec_stats(Mask *m)
     for (FieldMap::const_iterator it=sp.begin(); it!=sp.end(); ++it)
         stats->add_fluxes(m->profs[it->first+"flux"].data, m->profs[it->first+"w"].data, m->profs[it->first+"diff"].data);
 
-    if (model->diff->get_switch() == "smag2")
+    if (model->diff->get_switch() == "smag2" || model->diff->get_switch() == "sgs_tke")
         stats->calc_mean(m->profs["evisc"].data, sd["evisc"]->data, NoOffset, sloc, atmp["tmp3"]->data, stats->nmask);
 }
 
@@ -864,7 +865,7 @@ void Fields::create_stats()
         stats->add_prof(sd["p"]->name +"grad", "Gradient of the " + sd["p"]->longname, sd["p"]->unit + " m-1", "zh");
 
         // CvH, shouldn't this call be in the diffusion class?
-        if (model->diff->get_switch() == "smag2")
+        if (model->diff->get_switch() == "smag2" || model->diff->get_switch() == "sgs_tke")
             stats->add_prof(sd["evisc"]->name, sd["evisc"]->longname, sd["evisc"]->unit, "z");
 
         // moments
@@ -1111,4 +1112,3 @@ void Fields::exec_column()
     }
     column->calc_column(column->profs["p"].data, sd["p"]->data, NoOffset);
 }
-

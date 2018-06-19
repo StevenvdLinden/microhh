@@ -1,7 +1,7 @@
 MICROHH TODO LIST
-Mon Jun 18 21:50:00 CEST 2018
-src/fields.cxx:189: Define a reference density. Needs to be replaced once anelastic is there
-src/fields.cxx:610: remove these from the model?
+Tue Jun 19 12:36:27 CEST 2018
+src/fields.cxx:190: Define a reference density. Needs to be replaced once anelastic is there
+src/fields.cxx:611: remove these from the model?
 src/thermo_vapor.cxx:384: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
 src/thermo_moist.cxx:185:                    const double F   = 1.; : test)
 src/thermo_moist.cxx:504:                        const double F   = 1.; : test)
@@ -14,7 +14,7 @@ src/budget_4.cxx:667: implement the proper BC as soon as the full BC's for press
 src/grid.cxx:460: add the vertical component
 src/grid.cxx:495: add the vertical component
 src/fields.cu:32: use interp2 functions instead of manual interpolation
-src/diff_sgs_tke.cxx:399: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
+src/diff_sgs_tke.cxx:401: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
 src/budget_2.cxx:670: : what to do with w2_pres and uw_pres at the top boundary? Pressure at k=kend is undefined?
 src/stats.cxx:560: this might not be accurate enough, extrapolate properly
 src/stats.cxx:578: the count function assumes that the variable to count is at the mask location

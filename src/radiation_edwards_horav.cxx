@@ -61,6 +61,7 @@ namespace
     std::vector<double> c2;
     std::vector<double> pl0;
     std::vector<double> pl1;
+    std::vector<double> pl2;
     std::vector<double> fdn_above_0;
     std::vector<double> fdn_above_1;
 
@@ -119,6 +120,7 @@ void Radiation_edwards_horav::init(double ifactor)
     c2.resize(nlines);
     pl0.resize(nlines);
     pl1.resize(nlines);
+    pl2.resize(nlines);
     fdn_above_0.resize(nlines);
     fdn_above_1.resize(nlines);
 
@@ -150,6 +152,7 @@ void Radiation_edwards_horav::create(Input* inputin)
     nerror += inputin->get_prof(c2.data(), "c2", nlines);
     nerror += inputin->get_prof(pl0.data(), "pl0", nlines);
     nerror += inputin->get_prof(pl1.data(), "pl1", nlines);
+    nerror += inputin->get_prof(pl2.data(), "pl2", nlines);
     nerror += inputin->get_prof(fdn_above_0.data(), "fdn_above_0", nlines);
     nerror += inputin->get_prof(fdn_above_1.data(), "fdn_above_1", nlines);
 
@@ -263,7 +266,7 @@ void Radiation_edwards_horav::calc_radiation_fluxes_up_2(double* restrict flux_u
         const int ij = grid->istart + grid->jstart*jj;
 
         // this has to be used for now, as Tabs at ghost cell would not be defined properly!
-        fl_up_nr[kb] = pl0[kr] + pl1[kr] * Tbot[ij];
+        fl_up_nr[kb] = pl0[kr] + pl1[kr] * Tbot[ij] + pl2[kr] * Tbot[ij] * Tbot[ij];
         // function above could be replaced by ??:
         // fl_up_nr[kb] = pl0[kr] + pl1[kr] * interp2(temp[kb],temp[kb-1]);
 
@@ -279,8 +282,9 @@ void Radiation_edwards_horav::calc_radiation_fluxes_up_2(double* restrict flux_u
             trans = std::exp(-diffus * tau);
 
             // planckian functions at top and bottom of air layers
-            bbt = pl0[kr] + pl1[kr] * interp2(temp[k-1], temp[k]);
-            bbb = pl0[kr] + pl1[kr] * interp2(temp[k-2], temp[k-1]);
+            // planckian functions at top and bottom of air layers
+            bbt = pl0[kr] + pl1[kr] * interp2(temp[k-1], temp[k]) + pl2[kr] * interp2(temp[k-1], temp[k]) * interp2(temp[k-1], temp[k]);
+            bbb = pl0[kr] + pl1[kr] * interp2(temp[k-2], temp[k-1]) + pl2[kr] * interp2(temp[k-2], temp[k-1]) * interp2(temp[k-2], temp[k-1]);
 
             // calculate upward flux for current level and radiation band
             fl_up_nr[k] = bbt + trans * (fl_up_nr[k-1] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau);
@@ -327,9 +331,8 @@ void Radiation_edwards_horav::calc_radiation_fluxes_dn_2(double* restrict flux_d
             trans = std::exp(-diffus * tau);
 
             // planckian functions at top and bottom of air layers
-            bbt = pl0[kr] + pl1[kr] * interp2(temp[k-1], temp[k]);
-            bbb = pl0[kr] + pl1[kr] * interp2(temp[k-2], temp[k-1]);
-
+            bbt = pl0[kr] + pl1[kr] * interp2(temp[k-1], temp[k]) + pl2[kr] * interp2(temp[k-1], temp[k]) * interp2(temp[k-1], temp[k]);
+            bbb = pl0[kr] + pl1[kr] * interp2(temp[k-2], temp[k-1]) + pl2[kr] * interp2(temp[k-2], temp[k-1]) * interp2(temp[k-2], temp[k-1]);
             // calculate downward flux for current level and radiation band
             fl_dn_nr[k-1] = bbb + trans * (fl_dn_nr[k] - bbt) - (bbb - bbt) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !
 
@@ -365,7 +368,7 @@ void Radiation_edwards_horav::calc_radiation_fluxes_up_4(double* restrict flux_u
         const int ij = grid->istart + grid->jstart*jj;
 
         // this has to be used for now, as Tabs at ghost cell would not be defined properly!
-        fl_up_nr[kb] = pl0[kr] + pl1[kr] * Tbot[ij];
+        fl_up_nr[kb] = pl0[kr] + pl1[kr] * Tbot[ij] + pl2[kr] * Tbot[ij] * Tbot[ij];
         // function above could be replaced by ??:
         // fl_up_nr[kb] = pl0[kr] + pl1[kr] * interp4(temp[kb+1],temp[kb],temp[kb-1],temp[kb-2]);
 
@@ -382,8 +385,10 @@ void Radiation_edwards_horav::calc_radiation_fluxes_up_4(double* restrict flux_u
             trans = std::exp(-diffus * tau);
 
             // planckian functions at top and bottom of air layers
-            bbt = pl0[kr] + pl1[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]);
-            bbb = pl0[kr] + pl1[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]);
+            bbt = pl0[kr] + pl1[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1])
+                + pl2[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]) * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]);
+            bbb = pl0[kr] + pl1[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k])
+                + pl2[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]) * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]);
 
             // calculate flux for current level and radiation band
             fl_up_nr[k] = bbt + trans * (fl_up_nr[k-1] - bbb) - (bbt - bbb) * (1.0 - trans) / (diffus * tau);
@@ -429,8 +434,10 @@ void Radiation_edwards_horav::calc_radiation_fluxes_dn_4(double* restrict flux_d
             trans = std::exp(-diffus * tau);
 
             // planckian functions at top and bottom of air layers
-            bbt = pl0[kr] + pl1[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]);
-            bbb = pl0[kr] + pl1[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]);
+            bbt = pl0[kr] + pl1[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1])
+                + pl2[kr] * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]) * interp4(temp[k-2], temp[k-1], temp[k], temp[k+1]);
+            bbb = pl0[kr] + pl1[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k])
+                + pl2[kr] * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]) * interp4(temp[k-3], temp[k-2], temp[k-1], temp[k]);
 
             // calculate flux for current level and radiation band
             fl_dn_nr[k-1] = bbb + trans * (fl_dn_nr[k] - bbt) - (bbb - bbt) * (1.0 - trans) / (diffus * tau) ; // -kk points to height lower?? CHECK grid counting !

@@ -118,19 +118,22 @@ double Diff_sgs_tke::get_dn(const double dt)
 
 void Diff_sgs_tke::exec_viscosity()
 {
-    // Do a cast because the base boundary class does not have the MOST related variables.
+    // do a cast because the base boundary class does not have the MOST related variables.
     Boundary_surface* boundaryptr = static_cast<Boundary_surface*>(model->boundary);
+
+    // enforce minimum value of SGS-TKE to avoid possible zero-length scale (do it here as this function is always called before the following integration step)
+    set_minimum_sgs_tke(fields->sp["sgs_tke"]->data);
 
     // start with retrieving the stability information
     if (model->thermo->get_switch() == "0")
     {
-        // Calculate eddy viscosity using MO at lowest model level
+        // calculate eddy viscosity using MO at lowest model level
         if (model->boundary->get_switch() == "surface")
             calc_evisc_neutral<false>(fields->sd["evisc"]->data,
                                       fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
                                       fields->u->datafluxbot, fields->v->datafluxbot,
                                       grid->z, grid->dz, boundaryptr->z0m, fields->visc);
-        // Calculate eddy viscosity assuming resolved walls
+        // calculate eddy viscosity assuming resolved walls
         else
             calc_evisc_neutral<true>(fields->sd["evisc"]->data,
                                      fields->sp["sgs_tke"]->data, fields->u->data, fields->v->data, fields->w->data,
@@ -219,7 +222,7 @@ void Diff_sgs_tke::exec()
         // NOOT: currently, this would work because tmp2 which holds N2 should NOT be overwritten already at this stage.
         for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
         {
-            if(it->second->name.c_str()== "sgs_tket") // NOOT : is dit de correcte verwijzing naar sgs_tke-veld, hoe werkt de Map ? Waarom ->second i.p.v. ->first ?
+            if(it->first == "sgs_tke") // NOOT : is dit de correcte verwijzing naar sgs_tke-veld, hoe werkt de Map ? Waarom ->second i.p.v. ->first ?
             {
                 diff_sgs_tke<false>(it->second->data, fields->sp[it->first]->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
                              fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
@@ -244,7 +247,7 @@ void Diff_sgs_tke::exec()
         // NOOT: currently, this would work because tmp2 which holds N2 should NOT be overwritten already at this stage.
         for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
         {
-            if(it->second->name.c_str() == "sgs_tket")
+            if(it->first == "sgs_tke")
             {
                 diff_sgs_tke<true>(it->second->data, fields->sp[it->first]->data, grid->dzi, grid->dzhi, fields->sd["evisc"]->data,
                             fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
@@ -981,7 +984,7 @@ void Diff_sgs_tke::diff_sgs_tke(double* restrict sgstket, double* restrict sgstk
                              // NOOT: voor nu ervoor gekozen om diffusie door top via fluxtop weg te halen
                              //+ (-rhorefh[kend  ] * fluxtop[ij]
                             //   - rhorefh[kend-1] * eviscb*(sgstke[ijk   ]-sgstke[ijk-kk])*dzhi[kend-1] ) / rhoref[kend-1] * dzi[kend-1];            }
-
+            }
     }
 
     // NOOT : Resolved wall voor SGS TKE vereist dat de ghostcell wordt ingesteld -> geen flux vereist dat (sgstke[ijk   ]-sgstke[ijk-kk]) == 0 --> dus afgeleide is nul --> swbot[sgs_tke] = neumann, sbot[sgs_tke] = 0
@@ -1203,6 +1206,26 @@ void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstk
                   prandtl[ijk] = 1 / (ch1 + ch2 * fac / mlen0);
               }
       }
+}
+
+void Diff_sgs_tke::set_minimum_sgs_tke(double* restrict sgstke)
+{
+        const int jj = grid->icells;
+        const int kk = grid->ijcells;
+
+        double sgstkemin = this->sgstkemin;
+
+        for (int k=grid->kstart; k<grid->kend; ++k)
+        {
+            for (int j=grid->jstart; j<grid->jend; ++j)
+                #pragma ivdep
+                for (int i=grid->istart; i<grid->iend; ++i)
+                {
+                    const int ijk = i + j*jj + k*kk;
+
+                    sgstke[ijk] = std::max(sgstke[ijk],sgstkemin);
+                }
+        }
 }
 
 void Diff_sgs_tke::init_stats() ///< function for additional statistics, SvdLinden, May 2018
