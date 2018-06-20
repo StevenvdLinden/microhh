@@ -1075,7 +1075,7 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
                 tPri = (ch1 + ch2 * fac / mlen0);
 
                 // Calculate buoyancy production of TKE based on Deardorff, 1980
-                sgstket[ijk] = - evisc[ijk] * N2[ijk] * tPri;
+                sgstket[ijk] += -1 * evisc[ijk] * N2[ijk] * tPri;
             }
     }
 }
@@ -1118,7 +1118,7 @@ void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double
                 fac  = std::min(mlen0, mlen);
 
                 ce           = ce1 + ce2 * fac / mlen0;
-                sgstket[ijk] = -1 * ce * std::pow(sgstke[ijk], 3./2.) / fac;
+                sgstket[ijk] += -1 * ce * std::pow(sgstke[ijk], 3./2.) / fac;
                 // NOOT: Natuurlijk tijdelijk, SvdLinden, June 2018
                 if(sgstket[ijk]!=sgstket[ijk])
                 {
