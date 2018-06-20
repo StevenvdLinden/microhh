@@ -113,7 +113,7 @@ Thermo_vapor::Thermo_vapor(Model* modelin, Input* inputin) : Thermo(modelin, inp
     // swupdate..=0 -> initial base state pressure used in saturation calculation
     // swupdate..=1 -> base state pressure updated before saturation calculation
     nerror += inputin->get_item(&swupdatebasestate, "thermo", "swupdatebasestate", "");
-    
+
     // Time variable surface pressure
     nerror += inputin->get_item(&swtimedep_pbot, "thermo", "swtimedep_pbot", "", 0);
 
@@ -320,6 +320,12 @@ void Thermo_vapor::exec_stats(Mask *m)
             stats->calc_diff_2nd(fields->atmp["tmp1"]->data, fields->w->data, fields->sd["evisc"]->data,
                                  m->profs["bdiff"].data, grid->dzhi,
                                  fields->atmp["tmp1"]->datafluxbot, fields->atmp["tmp1"]->datafluxtop, diffptr->tPr, sloc,
+                                 fields->atmp["tmp4"]->data, stats->nmaskh);
+        }
+        else if (model->diff->get_switch() == "sgs_tke")
+        {
+            std::printf("STILL FIX!! for now use standard calc_diff_2nd-calculation\n");
+            stats->calc_diff_2nd(fields->atmp["tmp1"]->data, m->profs["bdiff"].data, grid->dzhi, fields->sp["th"]->visc, sloc,
                                  fields->atmp["tmp4"]->data, stats->nmaskh);
         }
         else
@@ -536,7 +542,7 @@ void Thermo_vapor::calc_buoyancy_tend_2nd(double* restrict wt, double* restrict 
 {
     const int jj = grid->icells;
     const int kk = grid->ijcells;
-    
+
     for (int k=grid->kstart+1; k<grid->kend; k++)
     {
         for (int j=grid->jstart; j<grid->jend; j++)
@@ -755,4 +761,3 @@ void Thermo_vapor::calc_buoyancy_tend_4th(double* restrict wt, double* restrict 
             }
     }
 }
-

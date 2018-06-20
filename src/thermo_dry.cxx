@@ -224,6 +224,12 @@ void Thermo_dry::exec_stats(Mask *m)
                                  fields->atmp["tmp1"]->datafluxbot, fields->atmp["tmp1"]->datafluxtop, diffptr->tPr, sloc,
                                  fields->atmp["tmp4"]->data, stats->nmaskh);
         }
+        else if (model->diff->get_switch() == "sgs_tke")
+        {
+            std::printf("STILL FIX!! for now use standard calc_diff_2nd-calculation\n");
+            stats->calc_diff_2nd(fields->atmp["tmp1"]->data, m->profs["bdiff"].data, grid->dzhi, fields->sp["th"]->visc, sloc,
+                                 fields->atmp["tmp4"]->data, stats->nmaskh);
+        }
         else
             stats->calc_diff_2nd(fields->atmp["tmp1"]->data, m->profs["bdiff"].data, grid->dzhi, fields->sp["th"]->visc, sloc,
                                  fields->atmp["tmp4"]->data, stats->nmaskh);

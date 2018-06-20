@@ -47,7 +47,7 @@ Budget_2::Budget_2(Input* inputin, Master* masterin, Grid* gridin, Fields* field
     vmodel = 0;
 
     // The LES flux budget requires one additional ghost cell in the horizontal
-    if(diff.get_switch() == "smag2")
+    if(diff.get_switch() == "smag2" || diff.get_switch() == "sgs_tke")
     {
         const int igc = 2;
         const int jgc = 2;
@@ -115,7 +115,7 @@ void Budget_2::create()
         stats.add_prof("vw_visc" , "Viscous transport term in VW budget" , "m2 s-3", "zh");
 
         // For LES, add the total diffusive budget terms, which (unlike diss + visc) close
-        if(diff.get_switch() == "smag2")
+        if(diff.get_switch() == "smag2" || diff.get_switch() == "sgs_tke")
         {
             stats.add_prof("u2_diff" , "Total diffusive term in U2 budget" , "m2 s-3", "z" );
             stats.add_prof("v2_diff" , "Total diffusive term in V2 budget" , "m2 s-3", "z" );
