@@ -1,11 +1,11 @@
 MICROHH TODO LIST
-Wed Jun 20 08:56:26 CEST 2018
+Wed Jun 20 18:36:30 CEST 2018
 src/fields.cxx:190: Define a reference density. Needs to be replaced once anelastic is there
 src/fields.cxx:611: remove these from the model?
-src/thermo_vapor.cxx:384: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
+src/thermo_vapor.cxx:390: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
 src/thermo_moist.cxx:185:                    const double F   = 1.; : test)
 src/thermo_moist.cxx:504:                        const double F   = 1.; : test)
-src/thermo_moist.cxx:1630: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
+src/thermo_moist.cxx:1636: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
 src/diff_scm.cxx:323: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
 src/model.cxx:106: Make an interface that takes this out of the main loop.
 src/budget_4.cxx:220: put the correct value for visc here!!!!!
@@ -19,6 +19,6 @@ src/budget_2.cxx:670: : what to do with w2_pres and uw_pres at the top boundary?
 src/stats.cxx:560: this might not be accurate enough, extrapolate properly
 src/stats.cxx:578: the count function assumes that the variable to count is at the mask location
 src/diff_smag2.cxx:321: use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
-src/thermo_dry.cxx:299: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
+src/thermo_dry.cxx:305: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
 include/fields.h:98: remove these to and bring them to diffusion model
 include/model.h:60: maybe it is safer to create get functions
