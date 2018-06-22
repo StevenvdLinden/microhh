@@ -108,7 +108,7 @@ class Diff_sgs_tke : public Diff
 
         // For now place additional constants for SGS-TKE model (Deardorff; 1973,1980) here ///< SJA van der Linden, 7 May 2018
         const double ap  = 1.5;
-        const double cf  = 2.0;//2.5; temporary change as prescribed by A Moene for gabls1 (in dales)
+        const double cf  = 2.5;
         const double ce1 = 0.19;
         const double ce2 = 0.51;
         const double cm  = 0.12;
