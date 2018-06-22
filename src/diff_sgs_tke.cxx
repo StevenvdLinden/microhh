@@ -423,8 +423,10 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
 
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
                     mlen  = mlen0;
-                    if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                    if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
+                    fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+
                     evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc;
                 }
         }
@@ -460,8 +462,10 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
 
                     // Calculate eddy viscosity for momentum based on Deardorff, 1980
                     mlen  = mlen0;
-                    if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                    if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
+                    fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+
                     evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc; // For now, do not add molecular viscosity
                 }
         }
@@ -822,8 +826,9 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
 
                 // Calculate turbulent length scale based on Deardorff, 1980
                 mlen  = mlen0;
-                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
+                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -857,8 +862,9 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
 
                 // Calculate turbulent length scale based on Deardorff, 1980
                 mlen  = mlen0;
-                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
+                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -892,8 +898,10 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
 
                 // Calculate turbulent length scale based on Deardorff, 1980
                 mlen  = mlen0;
-                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
+                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
 
@@ -1068,8 +1076,9 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
 
                 // Calculate turbulent length scale based on Deardorff, 1980
                 mlen  = mlen0;
-                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
+                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -1114,8 +1123,9 @@ void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double
 
                 // Calculate dissipation of TKE based on Deardorff, 1980
                 mlen  = mlen0;
-                if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
+                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
 
                 ce           = ce1 + ce2 * fac / mlen0;
                 sgstket[ijk] += -1 * ce * std::pow(sgstke[ijk], 3./2.) / fac;
@@ -1199,8 +1209,9 @@ void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstk
                   const int ijk = i + j*jj + k*kk;
 
                   mlen  = mlen0;
-                  if(N2[ijk] <= 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
+                  if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                   fac  = std::min(mlen0, mlen);
+                  fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
 
                   // Calculate the stability dependent turbulent Prandtl number
                   prandtl[ijk] = 1 / (ch1 + ch2 * fac / mlen0);
