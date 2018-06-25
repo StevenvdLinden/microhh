@@ -205,9 +205,9 @@ void Diff_sgs_tke::exec()
     model->thermo->get_thermo_field(fields->atmp["tmp1"], fields->atmp["tmp2"], "N2", false);
 
     calc_sgs_tke_buoyancy_tend_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, fields->sd["evisc"]->data, N2,
-                                 grid->dz);
+                                 grid->z, grid->dz, boundaryptr->z0m);
     calc_sgs_tke_dissipation_2nd(fields->st["sgs_tke"]->data, fields->sp["sgs_tke"]->data, N2,
-                                 grid->dz);
+                                 grid->z, grid->dz, boundaryptr->z0m);
 
     if(model->boundary->get_switch() == "surface")
     {
@@ -229,8 +229,8 @@ void Diff_sgs_tke::exec()
             }
             else
             {
-                diff_c<false>(it->second->data, fields->sp[it->first]->data, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
-                      fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
+                diff_c<false>(it->second->data, fields->sp[it->first]->data, grid->z, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
+                      fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh, boundaryptr->z0m);
             }
         }
     }
@@ -254,8 +254,8 @@ void Diff_sgs_tke::exec()
             }
             else
             {
-                diff_c<true>(it->second->data, fields->sp[it->first]->data, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
-                      fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh);
+                diff_c<true>(it->second->data, fields->sp[it->first]->data, grid->z, grid->dz, grid->dzi, grid->dzhi, fields->sd["evisc"]->data, fields->sp["sgs_tke"]->data, N2,
+                      fields->sp[it->first]->datafluxbot, fields->sp[it->first]->datafluxtop, fields->rhoref, fields->rhorefh, boundaryptr->z0m);
             }
         }
     }
@@ -388,8 +388,9 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
 
     // local copies to aid vectorization
     // NOOT: volgens mij is het maken van local copies onnodig voor consts ?
-    double cm  = this->cm;
-    double cn  = this->cn;
+    double cm = this->cm;
+    double cn = this->cn;
+    double nm = this->nm;
 
     // NOOT , anyway: waarom wordt hier lokaal MO gebruikt voor de RitPrratio, en 'mist' bijdrage level kstart+1 aan de afgeleide van th
     // for (int j=grid->jstart; j<grid->jend; ++j)
@@ -425,7 +426,7 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
                     mlen  = mlen0;
                     if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
-                    fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                    fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                     evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc;
                 }
@@ -464,7 +465,7 @@ void Diff_sgs_tke::calc_evisc(double* restrict evisc,
                     mlen  = mlen0;
                     if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                     fac  = std::min(mlen0, mlen);
-                    fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                    fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                     evisc[ijk] = cm * fac * std::sqrt(sgstke[ijk]) + mvisc; // For now, do not add molecular viscosity
                 }
@@ -491,8 +492,9 @@ void Diff_sgs_tke::calc_evisc_neutral(double* restrict evisc,
     const double dx = grid->dx;
     const double dy = grid->dy;
 
-    const double cm  = this->cm;
-    const double cn  = this->cn;
+    double cm = this->cm;
+    double cn = this->cn;
+    double nm = this->nm;
 
     if (resolved_wall)
     {
@@ -781,9 +783,9 @@ void Diff_sgs_tke::diff_w(double* restrict wt, double* restrict u, double* restr
 
 template <bool resolved_wall>
 void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
-                         double* restrict dz, double* restrict dzi, double* restrict dzhi, double* restrict evisc, double* restrict sgstke, double* restrict N2,
+                         double* restrict z, double* restrict dz, double* restrict dzi, double* restrict dzhi, double* restrict evisc, double* restrict sgstke, double* restrict N2,
                          double* restrict fluxbot, double* restrict fluxtop,
-                         double* restrict rhoref, double* restrict rhorefh)
+                         double* restrict rhoref, double* restrict rhorefh, const double z0m)
 {
     // Variables for the length scale
     double mlen,mlen0,fac;
@@ -806,6 +808,7 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
     double ch1 = this->ch1;
     double ch2 = this->ch2;
     double cn  = this->cn;
+    double nm  = this->nm;
 
     double evisce,eviscw,eviscn,eviscs,evisct,eviscb;
 
@@ -828,7 +831,7 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen  = mlen0;
                 if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[grid->kstart]+z0m), nm))), 1./nm); // first grid level should be at kstart
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -864,7 +867,7 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen  = mlen0;
                 if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[grid->kend-1]+z0m), nm))), 1./nm); // last true gridpoint should be kend-1
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -900,7 +903,7 @@ void Diff_sgs_tke::diff_c(double* restrict at, double* restrict a,
                 mlen  = mlen0;
                 if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -1042,7 +1045,9 @@ void Diff_sgs_tke::calc_sgs_tke_shear_tend_2nd(double* restrict sgstket,
 }
 
 void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, double* restrict sgstke,
-                                                 double* restrict evisc, double* restrict N2, double* restrict dz)
+                                                 double* restrict evisc, double* restrict N2,
+                                                 double* restrict z, double* restrict dz,
+                                                 const double z0m)
 {
     // NOOT: N2 en eddy viscosity zijn gedefinieerd op cell center niveau? Dan zou productie direct moeten volgen uit hun product
 
@@ -1062,6 +1067,7 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
     double ch1 = this->ch1;
     double ch2 = this->ch2;
     double cn  = this->cn;
+    double nm  = this->nm;
 
     for (int k=grid->kstart; k<grid->kend; ++k)
     {
@@ -1078,7 +1084,7 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
                 mlen  = mlen0;
                 if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                 // Calculate the inverse stability dependent turbulent Prandtl number
                 tPri = (ch1 + ch2 * fac / mlen0);
@@ -1092,7 +1098,8 @@ void Diff_sgs_tke::calc_sgs_tke_buoyancy_tend_2nd(double* restrict sgstket, doub
 // NOOT: voor dissipatie is geen 2de en 4de orde nodig --> lokaal, in grid cell effect
 // NOOT: N2 wordt nu berekend via 2de orde interpolatie --> dus zelfs wanneer 4de orde schema voor LES ingeprogrammeerd wordt, blijft geheel toch lagere orde?
 void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double* restrict sgstke,
-                                               double* restrict N2, double* restrict dz)
+                                               double* restrict N2, double* restrict z, double* restrict dz,
+                                               const double z0m)
 {
     // Variables for the length scale and dissipation.
     double mlen,mlen0,fac;
@@ -1109,6 +1116,7 @@ void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double
     double ce1 = this->ce1;
     double ce2 = this->ce2;
     double cn  = this->cn;
+    double nm  = this->nm;
 
     for (int k=grid->kstart; k<grid->kend; ++k)
     {
@@ -1125,7 +1133,7 @@ void Diff_sgs_tke::calc_sgs_tke_dissipation_2nd(double* restrict sgstket, double
                 mlen  = mlen0;
                 if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                 fac  = std::min(mlen0, mlen);
-                fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                 ce           = ce1 + ce2 * fac / mlen0;
                 sgstket[ijk] += -1 * ce * std::pow(sgstke[ijk], 3./2.) / fac;
@@ -1177,7 +1185,9 @@ double Diff_sgs_tke::calc_dnmul(double* restrict evisc, double* restrict dzi, do
     return dnmul;
 }
 
-void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstke, double* restrict N2, double* restrict dz)
+void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstke, double* restrict N2,
+                                double* restrict z, double* restrict dz,
+                                const double z0m)
 {
 
       // Variables for the length scale
@@ -1196,6 +1206,7 @@ void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstk
       double ch1 = this->ch1;
       double ch2 = this->ch2;
       double cn  = this->cn;
+      double nm  = this->nm;
 
       for (int k=grid->kstart; k<grid->kend; ++k)
       {
@@ -1211,7 +1222,7 @@ void Diff_sgs_tke::calc_prandtl(double* restrict prandtl, double* restrict sgstk
                   mlen  = mlen0;
                   if( N2[ijk] > 0) mlen = cn * std::sqrt(sgstke[ijk]) / std::sqrt(std::abs(N2[ijk]));
                   fac  = std::min(mlen0, mlen);
-                  fac  = std::pow(1./(1./std::pow(fac, n) + 1./(std::pow(Constants::kappa*(z[k]+z0m), n))), 1./n);
+                  fac  = std::pow(1./(1./std::pow(fac, nm) + 1./(std::pow(Constants::kappa*(z[k]+z0m), nm))), 1./nm);
 
                   // Calculate the stability dependent turbulent Prandtl number
                   prandtl[ijk] = 1 / (ch1 + ch2 * fac / mlen0);
@@ -1257,14 +1268,18 @@ void Diff_sgs_tke::exec_stats(Mask *m)
         // define the location
         const int sloc[] = {0,0,0};
 
+        Boundary_surface* boundaryptr = static_cast<Boundary_surface*>(model->boundary);
+
         // retrieve buoyancy field for use in SGS TKE production and store in tmp1
         // store the buoyancyflux in tmp1
         model->thermo->get_buoyancy_fluxbot(fields->atmp["tmp1"]);
         // retrieve the full field in tmp1 and use tmp2 for temporary calculations
         model->thermo->get_thermo_field(fields->atmp["tmp1"], fields->atmp["tmp2"], "N2", false);
 
+        // NOOT: dit werkt nu alleen maar voor LES met surface model,
+        // fix nog bij gebruik wall resolved LES
         // recalculate stability dependent turbulent Prandtl number and store in tmp2
-        calc_prandtl(fields->atmp["tmp2"]->data, fields->sp["sgs_tke"]->data, fields->atmp["tmp1"]->data, grid->dz);
+        calc_prandtl(fields->atmp["tmp2"]->data, fields->sp["sgs_tke"]->data, fields->atmp["tmp1"]->data, grid->z, grid->dz, boundaryptr->z0m);
 
         // calculate the mean, standard mask is always stored in tmp3 (see model.cxx)
         model->stats->calc_mean(m->profs["tPr"].data, fields->atmp["tmp2"]->data, NoOffset, sloc,
