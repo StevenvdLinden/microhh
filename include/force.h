@@ -32,6 +32,9 @@ class Grid;
 class Fields;
 class Master;
 class Input;
+class Stats;
+
+struct Mask;
 
 /**
  * Class for the right-hand side terms that contain large-scale forcings
