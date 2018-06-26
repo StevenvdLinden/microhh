@@ -970,6 +970,42 @@ void Stats::add_fluxes(double* restrict flux, double* restrict turb, double* res
     }
 }
 
+void Stats::write_profile(double* restrict data, double* restrict prof, int* restrict nmask)
+{
+    for (int k=grid->kstart; k<grid->kend; ++k)
+    {
+        prof[k] = data[k];
+    }
+
+    //master->sum(prof, grid->kcells);
+
+    //for (int k=1; k<grid->kcells; k++)
+    //{
+    //    if (nmask[k] > nthres)
+    //        prof[k] /= (double)(nmask[k]);
+    //    else
+    //        prof[k] = NC_FILL_DOUBLE;
+    //}
+}
+
+void Stats::write_profileh(double* restrict data, double* restrict prof, int* restrict nmask)
+{
+    for (int k=grid->kstart; k<grid->kend+1; ++k)
+    {
+        prof[k] = data[k];
+    }
+
+    //master->sum(prof, grid->kcells);
+
+    //for (int k=1; k<grid->kcells; k++)
+    //{
+    //    if (nmask[k] > nthres)
+    //        prof[k] /= (double)(nmask[k]);
+    //    else
+    //        prof[k] = NC_FILL_DOUBLE;
+    //}
+}
+
 /**
  * This function calculates the total domain integrated path of variable data over maskbot
  */
