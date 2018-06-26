@@ -69,6 +69,7 @@ class Force
         std::string get_switch_lspres()      { return swlspres; }
         double      get_coriolis_parameter() { return fc;       }
 
+        void exec_stats(Mask*); ///< Addition for large-scale vertical transport statistics.
     private:
         Master* master; ///< Pointer to master class.
         Model*  model;  ///< Pointer to model class.
@@ -78,7 +79,7 @@ class Force
         std::string swlspres; ///< Switch for the large scale pressure force.
         std::string swls;     ///< Switch for large scale scalar tendencies.
         std::string swwls;    ///< Switch for large-scale vertical transport of scalars.
-        std::string swnudge;  ///< Switch for nudging to reference profiles
+        std::string swnudge;  ///< Switch for nudging to reference profiles.
 
         double uflux; ///< Mean velocity used to enforce constant flux.
         double fc;    ///< Coriolis parameter.
@@ -86,6 +87,7 @@ class Force
         double* ug;  ///< Pointer to array u-component geostrophic wind.
         double* vg;  ///< Pointer to array v-component geostrophic wind.
         double* wls; ///< Pointer to array large-scale vertical velocity.
+        double* st_wls; ///< Pointer to array scalar tendency profile due to subsidence.
 
         double* nudge_factor;  ///< Height varying nudging factor (1/s)
 
@@ -137,6 +139,12 @@ class Force
 
         void advec_wls_2nd(double* const, const double* const,
                            const double* const, const double* const); ///< Calculates the large-scale vertical transport.
+
+        void advec_wls_2nd_forstat(double* const, const double* const,
+                                   const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
+
+        void init_stat();
+        Stats* stats;
 
         // GPU functions and variables
         double* ug_g;  ///< Pointer to GPU array u-component geostrophic wind.

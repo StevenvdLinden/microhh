@@ -33,6 +33,7 @@
 #include "model.h"
 #include "timeloop.h"
 #include "boundary.h"
+#include "stats.h"
 
 using namespace Finite_difference::O2;
 
@@ -54,6 +55,8 @@ Force::Force(Model* modelin, Input* inputin)
     wls_g = 0;
     nudge_factor_g = 0;
     timedepdata_wls_g = 0;
+
+    st_wls = 0;
 
     int nerror = 0;
     nerror += inputin->get_item(&swlspres, "force", "swlspres", "", "0");
@@ -125,6 +128,8 @@ Force::~Force()
     delete[] timedepdata_wls;
     delete[] nudge_factor;
 
+    delete[] st_wls;
+
     if (swls == "1")
     {
         for (std::vector<std::string>::const_iterator it=lslist.begin(); it!=lslist.end(); ++it)
@@ -169,7 +174,10 @@ void Force::init()
     }
 
     if (swwls == "1")
+    {
         wls = new double[grid->kcells];
+        st_wls = new double[grid->kcells];
+    }
 
     if (swnudge == "1")
     {
@@ -247,6 +255,9 @@ void Force::create(Input *inputin)
         if (swtimedep_wls == "1")
             nerror += model->input->get_time_prof(&timedepdata_wls, &timedeptime_wls, "wls", grid->kmax);
     }
+
+    // initialize 1D-profile statistics
+    init_stat();
 
     if (nerror)
         throw 1;
@@ -571,6 +582,59 @@ void Force::advec_wls_2nd(double* const restrict st, const double* const restric
                     const int ijk = i + j*jj + k*kk;
                     st[ijk] -=  wls[k] * (s[k+1]-s[k])*dzhi[k+1];
                 }
+        }
+    }
+}
+
+void Force::advec_wls_2nd_forstat(double* const restrict st_wls, const double* const restrict s,
+                          const double* const restrict wls, const double* const dzhi)
+{
+    // use an upwind differentiation
+    for (int k=grid->kstart; k<grid->kend; ++k)
+    {
+        if (wls[k] > 0.)
+        {
+            st_wls[k] =  -wls[k] * (s[k]-s[k-1])*dzhi[k];
+        }
+        else
+        {
+            st_wls[k] =  -wls[k] * (s[k+1]-s[k])*dzhi[k+1];
+        }
+    }
+}
+
+void Force::init_stat()
+{
+    if (model->stats->get_switch() == "1" && swwls == "1")
+    {
+        for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
+        {
+            // Get name from FieldMap and unit
+            std::string wls_fldname  = it->second->name + "t_wls";
+            std::string wls_longname = "Large scale vertical advective tendency of " + it->second->name;
+            std::string wls_unit     = it->second->unit + " s-1";
+
+            model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< Radiative tendencies
+        }
+    }
+}
+
+void Force::exec_stats(Mask *m)
+{
+    const double NoOffset = 0.;
+
+    // define the location
+    const int sloc[] = {0,0,0};
+
+    if (swwls == "1")
+    {
+        for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
+        {
+            // Get name from FieldMap and unit
+            std::string wls_fldname  = it->second->name + "t_wls";
+
+            advec_wls_2nd_forstat(st_wls, fields->sp[it->first]->datamean, wls, grid->dzhi);
+            model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
         }
     }
 }

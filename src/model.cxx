@@ -64,7 +64,7 @@ Model::Model(Master *masterin, Input *inputin)
     force    = 0;
     buffer   = 0;
 
-    stats  = 0;    
+    stats  = 0;
     column = 0;
     cross  = 0;
     dump   = 0;
@@ -198,7 +198,7 @@ void Model::load()
     fields->load(timeloop->get_iotime());
     fields->create_stats();
     fields->create_column();
-    
+
     // Initialize data or load data from disk.
     boundary->create(input);
 
@@ -240,8 +240,8 @@ void Model::exec()
     diff    ->prepare_device();
     force   ->prepare_device();
     // Prepare pressure last, for memory check
-    pres    ->prepare_device(); 
-    
+    pres    ->prepare_device();
+
     #endif
 
     master->print_message("Starting time integration\n");
@@ -304,12 +304,12 @@ void Model::exec()
                     t_stat.join();
                 fields  ->backward_device();
                 boundary->backward_device();
-                thermo  ->backward_device();                
+                thermo  ->backward_device();
                 t_stat=std::thread(&Model::do_stat,this, stats->doStats(), cross->do_cross(), dump->do_dump(), column->doColumn(),
                                     timeloop->get_iteration(), timeloop->get_time(), timeloop->get_itime(), timeloop->get_iotime());
                 #else
                 do_stat(stats->doStats(), cross->do_cross(), dump->do_dump(),column->doColumn(),timeloop->get_iteration(), timeloop->get_time(), timeloop->get_itime(), timeloop->get_iotime());
-                #endif             
+                #endif
             }
         }
 
@@ -462,6 +462,7 @@ void Model::set_time_step()
 void Model::calc_stats(std::string maskname)
 {
     fields  ->exec_stats(&stats->masks[maskname]);
+    force   ->exec_stats(&stats->masks[maskname]);
     thermo  ->exec_stats(&stats->masks[maskname]);
     budget  ->exec_stats(&stats->masks[maskname]);
     boundary->exec_stats(&stats->masks[maskname]);
@@ -518,7 +519,7 @@ void Model::print_status()
         if (master->mpiid == 0)
             std::fprintf(dnsout, "%8d %13.6G %10.4f %11.3E %8.4f %8.4f %11.3E %16.8E %16.8E %16.8E\n",
                     iter, time, cputime, dt, cfl, dn, div, mom, tke, mass);
-        
+
         if (!std::isfinite(cfl))
         {
             master->print_error("Simulation has non-finite numbers.\n");
