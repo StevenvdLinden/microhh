@@ -1,5 +1,5 @@
 MICROHH TODO LIST
-Fri Jun 22 20:12:46 CEST 2018
+Mon Jul  9 16:16:40 CEST 2018
 src/fields.cxx:190: Define a reference density. Needs to be replaced once anelastic is there
 src/fields.cxx:611: remove these from the model?
 src/thermo_vapor.cxx:390: BvS restore getThermoField(), the combination of checkThermoField with getThermoField is more elegant...
