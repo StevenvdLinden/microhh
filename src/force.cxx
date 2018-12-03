@@ -320,8 +320,15 @@ void Force::exec(double dt)
 
     if (swwls == "1")
     {
-        for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
-            advec_wls_2nd(it->second->data, fields->sp[it->first]->datamean, wls, grid->dzhi);
+        for (FieldMap::const_iterator it = fields->at.begin(); it!=fields->at.end(); ++it)
+            // For now, retain prototype of the old version that uses only mean fields; SvdLinden, 28 november 2018
+            // advec_wls_2nd_mean(it->second->data, fields->ap[it->first]->datamean, wls, grid->dzhi);
+            // Tentative change from st, sp to at, ap <<< SvdLinden, 27 november 2018
+
+            // Aanpassing nodig voor advectie van w-momentum? Zit op andere locatie in grid?
+            advec_wls_2nd(it->second->data, fields->ap[it->first]->data, wls, grid->dzhi);
+
+            // Change dzhi into dzi ?
     }
 
     if (swnudge == "1")
@@ -556,13 +563,17 @@ void Force::calc_nudging_tendency(double* const restrict fldtend, const double* 
     }
 }
 
-void Force::advec_wls_2nd(double* const restrict st, const double* const restrict s,
-                          const double* const restrict wls, const double* const dzhi)
+// DO STILL: w requires dzhi instead of dzi !!
+void Force::advec_wls_2nd(double* const restrict st, const double* const restrict s, const double* const restrict wls,
+                          const double* const dzhi, double* restrict rhoref, double* restrict rhorefh)
 {
+    const int ii = 1;
     const int jj = grid->icells;
     const int kk = grid->ijcells;
 
-    // use an upwind differentiation
+    // Doing it per cell effectively removes the need for an upwind scheme? Check with the Bea..
+    // Welke niveuas moet ik hier kiezen, specificieer wls op de half levels?
+
     for (int k=grid->kstart; k<grid->kend; ++k)
     {
         if (wls[k] > 0.)
@@ -571,7 +582,7 @@ void Force::advec_wls_2nd(double* const restrict st, const double* const restric
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
-                    st[ijk] -=  wls[k] * (s[k]-s[k-1])*dzhi[k];
+                    st[ijk] -=  wls[k] * (s[ijk]-s[ijk-kk])*dzhi[k];
                 }
         }
         else
@@ -580,14 +591,26 @@ void Force::advec_wls_2nd(double* const restrict st, const double* const restric
                 for (int i=grid->istart; i<grid->iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
-                    st[ijk] -=  wls[k] * (s[k+1]-s[k])*dzhi[k+1];
+                    st[ijk] -=  wls[k] * (s[ijk+kk]-s[ijk])*dzhi[k+1];
                 }
         }
     }
+
+//     for (int k=grid->kstart; k<grid->kend; ++k)
+//         for (int j=grid->jstart; j<grid->jend; ++j)
+// #pragma ivdep
+//             for (int i=grid->istart; i<grid->iend; ++i)
+//             {
+//                 const int ijk = i + j*jj + k*kk;
+//                 st[ijk] +=
+//                          - ( rhorefh[k+1] * wls[k+1] * interp2(s[ijk   ], s[ijk+kk])
+//                            - rhorefh[k  ] * wls[k  ] * interp2(s[ijk-kk], s[ijk   ]) ) / rhoref[k] * dzi[k];
+//                            // Op deze manier zou subsidentiesnelheid op de half levels gedefinieerd moeten worden
+//             }
 }
 
-void Force::advec_wls_2nd_forstat(double* const restrict st_wls, const double* const restrict s,
-                          const double* const restrict wls, const double* const dzhi)
+void Force::advec_wls_2nd_forstat(double* const restrict st, const double* const restrict s, const double* const restrict wls,
+                                  const double* const dzhi, double* restrict rhoref, double* restrict rhorefh)
 {
     // use an upwind differentiation
     for (int k=grid->kstart; k<grid->kend; ++k)
@@ -603,18 +626,62 @@ void Force::advec_wls_2nd_forstat(double* const restrict st_wls, const double* c
     }
 }
 
+// void Force::advec_wls_2nd_mean(double* const restrict st, const double* const restrict s,
+//                                const double* const restrict wls, double* const dzhi)
+// {
+//     // use an upwind differentiation
+//     for (int k=grid->kstart; k<grid->kend; ++k)
+//     {
+//         if (wls[k] > 0.)
+//         {
+//             for (int j=grid->jstart; j<grid->jend; ++j)
+//                 for (int i=grid->istart; i<grid->iend; ++i)
+//                 {
+//                     const int ijk = i + j*jj + k*kk;
+//                     st[ijk] -=  wls[k] * (s[k]-s[k-1])*dzhi[k];
+//                 }
+//         }
+//         else
+//         {
+//             for (int j=grid->jstart; j<grid->jend; ++j)
+//                 for (int i=grid->istart; i<grid->iend; ++i)
+//                 {
+//                     const int ijk = i + j*jj + k*kk;
+//                     st[ijk] -=  wls[k] * (s[k+1]-s[k])*dzhi[k+1];
+//                 }
+//         }
+//     }
+// }
+//
+// void Force::advec_wls_2nd_forstat_mean(double* const restrict st_wls, const double* const restrict s,
+//                                        const double* const restrict wls, const double* const dzhi)
+// {
+//     // use an upwind differentiation
+//     for (int k=grid->kstart; k<grid->kend; ++k)
+//     {
+//         if (wls[k] > 0.)
+//         {
+//             st_wls[k] =  -wls[k] * (s[k]-s[k-1])*dzhi[k];
+//         }
+//         else
+//         {
+//             st_wls[k] =  -wls[k] * (s[k+1]-s[k])*dzhi[k+1];
+//         }
+//     }
+// }
+
 void Force::init_stat()
 {
     if (model->stats->get_switch() == "1" && swwls == "1")
     {
-        for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
+        for (FieldMap::const_iterator it = fields->ap.begin(); it!=fields->ap.end(); ++it)
         {
             // Get name from FieldMap and unit
             std::string wls_fldname  = it->second->name + "t_wls";
             std::string wls_longname = "Large scale vertical advective tendency of " + it->second->name;
             std::string wls_unit     = it->second->unit + " s-1";
 
-            model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< Radiative tendencies
+            model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< Tendencies due to subsidence
         }
     }
 }
@@ -633,6 +700,8 @@ void Force::exec_stats(Mask *m)
             // Get name from FieldMap and unit
             std::string wls_fldname  = it->second->name + "t_wls";
 
+
+            //GLOBAAL -> vervang st_wls hier door een tempveld , en pas write_profile aan zdd MPI-sum wordt gebruikt
             advec_wls_2nd_forstat(st_wls, fields->sp[it->first]->datamean, wls, grid->dzhi);
             model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
         }

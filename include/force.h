@@ -146,6 +146,13 @@ class Force
         void advec_wls_2nd_forstat(double* const, const double* const,
                                    const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
 
+        void advec_wls_2nd_mean(double* const, const double* const,
+                                const double* const, const double* const); ///< Calculates the large-scale vertical transport.
+
+        void advec_wls_2nd_forstat_mean(double* const, const double* const,
+                                        const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
+
+
         void init_stat();
         Stats* stats;
 
