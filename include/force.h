@@ -141,17 +141,19 @@ class Force
                                    const double* const, const double* const); ///< Calculate nudging tendency.
 
         void advec_wls_2nd(double* const, const double* const,
-                           const double* const, const double* const); ///< Calculates the large-scale vertical transport.
+                           const double* const, const double* const); ///< Calculates the large-scale vertical transport of horizontal momentum and scalars.
 
-        void advec_wls_2nd_forstat(double* const, const double* const,
-                                   const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
+        void advec_wls_2nd_w(double* const, const double* const,
+                             const double* const, const double* const); ///< Calculates the large-scale vertical transport of w-momentum
 
-        void advec_wls_2nd_mean(double* const, const double* const,
-                                const double* const, const double* const); ///< Calculates the large-scale vertical transport.
-
-        void advec_wls_2nd_forstat_mean(double* const, const double* const,
-                                        const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
-
+        // void advec_wls_2nd_forstat(double* const, const double* const,
+        //                            const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
+        //
+        // void advec_wls_2nd_mean(double* const, const double* const,
+        //                         const double* const, const double* const); ///< Calculates the large-scale vertical transport.
+        //
+        // void advec_wls_2nd_forstat_mean(double* const, const double* const,
+        //                                 const double* const, const double* const); ///< Re-calculates the large-scale vertical transport for statistics.
 
         void init_stat();
         Stats* stats;

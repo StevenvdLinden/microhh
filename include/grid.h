@@ -90,10 +90,10 @@ class Grid
         double dy;     ///< Distance between the center of two grid cell in the y-direction.
         double dxi;    ///< Reciprocal of dx.
         double dyi;    ///< Reciprocal of dy.
-        double* dz;    ///< Distance between the center of two grid cell in the z-direction.
-        double* dzh;   ///< Distance between the two grid cell faces in the z-direction.
-        double* dzi;   ///< Reciprocal of dz.
-        double* dzhi;  ///< Reciprocal of dzh.
+        double* dz;    ///< Distance between the center of two grid cell in the z-direction. << Description should change, this is not what is calculated
+        double* dzh;   ///< Distance between the two grid cell faces in the z-direction. << Description should change, this is not what is calculated
+        double* dzi;   ///< Reciprocal of dz. << Description should change, this is not what is calculated
+        double* dzhi;  ///< Reciprocal of dzh. << Description should change, this is not what is calculated
         double* dzi4;  ///< Fourth order gradient of the distance between cell centers to be used in 4th-order schemes.
         double* dzhi4; ///< Fourth order gradient of the distance between cell faces to be used in 4th-order schemes.
 
@@ -104,8 +104,8 @@ class Grid
         double* y;  ///< Grid coordinate of cell center in y-direction.
         double* z;  ///< Grid coordinate of cell center in z-direction.
         double* xh; ///< Grid coordinate of cell faces in x-direction.
-        double* yh; ///< Grid coordinate of cell faces in x-direction.
-        double* zh; ///< Grid coordinate of cell faces in x-direction.
+        double* yh; ///< Grid coordinate of cell faces in y-direction.
+        double* zh; ///< Grid coordinate of cell faces in z-direction.
 
         double utrans; ///< Galilean transformation velocity in x-direction.
         double vtrans; ///< Galilean transformation velocity in y-direction.
