@@ -320,6 +320,9 @@ void Force::exec(double dt)
 
     if (swwls == "1")
     {
+        advec_wls_2nd(fields->ut->data, fields->u->datamean, wls, grid->dzhi); // Subsidence of u-momentum
+        advec_wls_2nd(fields->vt->data, fields->v->datamean, wls, grid->dzhi); // Subsidence of v-momentum
+
         for (FieldMap::const_iterator it = fields->st.begin(); it!=fields->st.end(); ++it)
             advec_wls_2nd(it->second->data, fields->sp[it->first]->datamean, wls, grid->dzhi);
     }
@@ -607,6 +610,18 @@ void Force::init_stat()
 {
     if (model->stats->get_switch() == "1" && swwls == "1")
     {
+        std::string wls_fldname  = "ut_wls";
+        std::string wls_longname = "Large scale vertical advective tendency of U velocity" + it->second->name;
+        std::string wls_unit     = "m s-2";
+
+        model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< U velocity subsidence tendency
+
+        std::string wls_fldname  = "vt_wls";
+        std::string wls_longname = "Large scale vertical advective tendency of V velocity" + it->second->name;
+        std::string wls_unit     = "m s-2";
+
+        model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< V velocity subsidence tendency
+
         for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
         {
             // Get name from FieldMap and unit
@@ -614,20 +629,34 @@ void Force::init_stat()
             std::string wls_longname = "Large scale vertical advective tendency of " + it->second->name;
             std::string wls_unit     = it->second->unit + " s-1";
 
-            model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< Radiative tendencies
+            model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< Scalar subsidence tendencies
         }
     }
 }
-
+// fields->u->datamean
 void Force::exec_stats(Mask *m)
 {
     const double NoOffset = 0.;
 
-    // define the location
+    // define locations
+    const int uloc[] = {1,0,0};
+    const int vloc[] = {0,1,0};
+    const int wloc[] = {0,0,1};
     const int sloc[] = {0,0,0};
 
     if (swwls == "1")
     {
+        // do U velocity
+        std::string wls_fldname  = "ut_wls";
+        advec_wls_2nd_forstat(st_wls, fields->u->datamean, wls, grid->dzhi);
+        model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
+
+        // do V velocity
+        std::string wls_fldname  = "vt_wls";
+        advec_wls_2nd_forstat(st_wls, fields->v->datamean, wls, grid->dzhi);
+        model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
+
+        // do scalars
         for (FieldMap::const_iterator it = fields->sp.begin(); it!=fields->sp.end(); ++it)
         {
             // Get name from FieldMap and unit
