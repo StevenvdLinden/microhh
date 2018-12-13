@@ -611,14 +611,14 @@ void Force::init_stat()
     if (model->stats->get_switch() == "1" && swwls == "1")
     {
         std::string wls_fldname  = "ut_wls";
-        std::string wls_longname = "Large scale vertical advective tendency of U velocity" + it->second->name;
+        std::string wls_longname = "Large scale vertical advective tendency of U velocity";
         std::string wls_unit     = "m s-2";
 
         model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< U velocity subsidence tendency
 
-        std::string wls_fldname  = "vt_wls";
-        std::string wls_longname = "Large scale vertical advective tendency of V velocity" + it->second->name;
-        std::string wls_unit     = "m s-2";
+        wls_fldname  = "vt_wls";
+        wls_longname = "Large scale vertical advective tendency of V velocity";
+        wls_unit     = "m s-2";
 
         model->stats->add_prof(wls_fldname, wls_longname, wls_unit, "z"); ///< V velocity subsidence tendency
 
@@ -652,7 +652,7 @@ void Force::exec_stats(Mask *m)
         model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
 
         // do V velocity
-        std::string wls_fldname  = "vt_wls";
+        wls_fldname  = "vt_wls";
         advec_wls_2nd_forstat(st_wls, fields->v->datamean, wls, grid->dzhi);
         model->stats->write_profile(st_wls, m->profs[wls_fldname].data, model->stats->nmask);
 
