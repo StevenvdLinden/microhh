@@ -81,8 +81,8 @@ struct Grid_data
     TF dxi;   // Reciprocal of dx.
     TF dyi;   // Reciprocal of dy.
 
-    std::vector<TF> dz;    // Distance between the faces of two grid cells in the z-direction.
-    std::vector<TF> dzh;   // Distance between the centers of two grid cells in the z-direction.
+    std::vector<TF> dz;    // Distance between the faces of two grid cells in the z-direction, positioned at height z
+    std::vector<TF> dzh;   // Distance between the centers of two grid cells in the z-direction, position at height zh
     std::vector<TF> dzi;   // Reciprocal of dz.
     std::vector<TF> dzhi;  // Reciprocal of dzh.
     std::vector<TF> dzi4;  // Fourth order gradient of the distance between cell faces to be used in 4th-order schemes.
@@ -95,8 +95,8 @@ struct Grid_data
     std::vector<TF> y;  // Grid coordinate of cell center in y-direction.
     std::vector<TF> z;  // Grid coordinate of cell center in z-direction.
     std::vector<TF> xh; // Grid coordinate of cell faces in x-direction.
-    std::vector<TF> yh; // Grid coordinate of cell faces in x-direction.
-    std::vector<TF> zh; // Grid coordinate of cell faces in x-direction.
+    std::vector<TF> yh; // Grid coordinate of cell faces in y-direction.
+    std::vector<TF> zh; // Grid coordinate of cell faces in z-direction.
 
     int ithread_block; // Number of grid cells in the x-direction for GPU thread block.
     int jthread_block; // Number of grid cells in the y-direction for GPU thread block.

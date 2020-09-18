@@ -233,6 +233,42 @@ namespace
         }
     }
 
+    //** SvdL: added slightly modified subsidence advection for vertical velocity due to different position in staggered grid.
+
+    template<typename TF>
+    void advec_wls_2nd_w(
+            TF* const restrict st, const TF* const restrict s,
+            const TF* const restrict wls, const TF* const dzi,
+            const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+            const int icells, const int ijcells)
+    {
+        const int jj = icells;
+        const int kk = ijcells;
+
+        // use an upwind differentiation
+        for (int k=kstart+1; k<kend; ++k)
+        {
+            if (wls[k] > 0.)
+            {
+                for (int j=jstart; j<jend; ++j)
+                    for (int i=istart; i<iend; ++i)
+                    {
+                        const int ijk = i + j*jj + k*kk;
+                        /st[ijk] -=  interp2(wls[k-1], wls[k]) * (s[k]-s[k-1])*dzi[k-1];
+                    }
+            }
+            else
+            {
+                for (int j=jstart; j<jend; ++j)
+                    for (int i=istart; i<iend; ++i)
+                    {
+                        const int ijk = i + j*jj + k*kk;
+                        /st[ijk] -=  interp2(wls[k-1], wls[k]) * (s[k+1]-s[k])*dzi[k];
+                    }
+            }
+        }
+    }
+
     template<typename TF>
     void add_offset(TF* const restrict prof, const TF offset, const int kstart, const int kend)
     {
@@ -473,6 +509,12 @@ void Force<TF>::create(Input& inputin, Netcdf_handle& input_nc, Stats<TF>& stats
 
         const TF offset = 0;
         tdep_wls->create_timedep_prof(input_nc, offset);
+
+        //** SvdL: added tendencies of horizontal momentum components due to large-scale vertical subsidence
+        stats.add_tendency(*fields.mt.at("u"),  "z", tend_name_subs, tend_longname_subs);
+        stats.add_tendency(*fields.mt.at("v"),  "z", tend_name_subs, tend_longname_subs);
+        stats.add_tendency(*fields.mt.at("w"), "zh", tend_name_subs, tend_longname_subs);
+
         for (auto& it : fields.st)
             stats.add_tendency(*it.second, "z", tend_name_subs, tend_longname_subs);
     }
@@ -544,6 +586,27 @@ void Force<TF>::exec(double dt, Thermo<TF>& thermo, Stats<TF>& stats)
 
     if (swwls == Large_scale_subsidence_type::Enabled)
     {
+
+        //** SvdL: calculate tendencies of horizontal momentum components due to large-scale vertical subsidence & store them
+        //** CHECK: how to properly do subsidence of vertical momentum itself
+        advec_wls_2nd<TF>(
+                fields.mt.at("u")->fld.data(), fields.sp.at(it.first)->fld_mean.data(), wls.data(), gd.dzhi.data(),
+                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                gd.icells, gd.ijcells);
+        advec_wls_2nd<TF>(
+                fields.mt.at("v")->fld.data(), fields.sp.at(it.first)->fld_mean.data(), wls.data(), gd.dzhi.data(),
+                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                gd.icells, gd.ijcells);
+        advec_wls_2nd_w<TF>(
+                fields.mt.at("w")->fld.data(), fields.sp.at(it.first)->fld_mean.data(), wls.data(), gd.dzi.data(),
+                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                gd.icells, gd.ijcells);
+
+        stats.calc_tend(*fields.mt.at("u"), tend_name_subs);
+        stats.calc_tend(*fields.mt.at("v"), tend_name_subs);
+        stats.calc_tend(*fields.mt.at("w"), tend_name_subs);
+        //**
+
         for (auto& it : fields.st)
         {
             advec_wls_2nd<TF>(
