@@ -73,6 +73,7 @@ class Diff_smag2 : public Diff<TF>
         double dnmul;
 
         double cs;
+        TF Rc;   ///< Newly added  cutoff-Richardson number.
 
         const std::string tend_name = "diff";
         const std::string tend_longname = "Diffusion";

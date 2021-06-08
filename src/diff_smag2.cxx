@@ -233,7 +233,7 @@ namespace
                     TF* restrict ustar, TF* restrict obuk,
                     const TF* restrict z, const TF* restrict dz, const TF* restrict dzi,
                     const TF dx, const TF dy,
-                    const TF z0m, const TF cs, const TF tPr,
+                    const TF z0m, const TF cs, const TF Rc,
                     const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
                     const int icells, const int jcells, const int ijcells,
                     Boundary_cyclic<TF>& boundary_cyclic)
@@ -255,7 +255,7 @@ namespace
                     {
                         const int ijk = i + j*jj + k*kk;
                         // Add the buoyancy production to the TKE
-                        TF RitPrratio = N2[ijk] / evisc[ijk] / tPr;
+                        TF RitPrratio = N2[ijk] / evisc[ijk] / Rc;
                         RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
                         evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                     }
@@ -295,7 +295,7 @@ namespace
                     const int ijk = i + j*jj + kstart*kk;
                     // TODO use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
                     // Add the buoyancy production to the TKE
-                    TF RitPrratio = -bfluxbot[ij]/(Constants::kappa<TF>*z[kstart]*ustar[ij])*most::phih(z[kstart]/obuk[ij]) / evisc[ijk] / tPr;
+                    TF RitPrratio = -bfluxbot[ij]/(Constants::kappa<TF>*z[kstart]*ustar[ij])*most::phih(z[kstart]/obuk[ij]) / evisc[ijk] / Rc;
                     RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
                     evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                 }
@@ -314,7 +314,7 @@ namespace
                     {
                         const int ijk = i + j*jj + k*kk;
                         // Add the buoyancy production to the TKE
-                        TF RitPrratio = N2[ijk] / evisc[ijk] / tPr;
+                        TF RitPrratio = N2[ijk] / evisc[ijk] / Rc;
                         RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
                         evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                     }
@@ -755,6 +755,7 @@ Diff_smag2<TF>::Diff_smag2(Master& masterin, Grid<TF>& gridin, Fields<TF>& field
     dnmax = inputin.get_item<TF>("diff", "dnmax", "", 0.4  );
     cs    = inputin.get_item<TF>("diff", "cs"   , "", 0.23 );
     tPr   = inputin.get_item<TF>("diff", "tPr"  , "", 1./3.);
+    Rc    = inputin.get_item<TF>("diff", "Rc"   , "", 1./4.);
 
     const std::string group_name = "default";
 
@@ -1010,7 +1011,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     boundary.ustar.data(), boundary.obuk.data(),
                     gd.z.data(), gd.dz.data(), gd.dzi.data(),
                     gd.dx, gd.dy,
-                    boundary.z0m, this->cs, this->tPr,
+                    boundary.z0m, this->cs, this->Rc,
                     gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
@@ -1022,7 +1023,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     nullptr, nullptr,
                     gd.z.data(), gd.dz.data(), gd.dzi.data(),
                     gd.dx, gd.dy,
-                    boundary.z0m, this->cs, this->tPr,
+                    boundary.z0m, this->cs, this->Rc,
                     gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
