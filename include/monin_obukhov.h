@@ -45,7 +45,10 @@ namespace Monin_obukhov
     CUDA_MACRO inline TF phim_stable(const TF zeta)
     {
         // Hogstrom, 1988
-        return TF(1.) + TF(4.8)*zeta;
+        //return TF(1.) + TF(4.8)*zeta;
+
+        // Classic textbook value? Search for reg
+        return TF(1.) + TF(5.)*zeta;
     }
 
     template<typename TF>
@@ -65,7 +68,10 @@ namespace Monin_obukhov
     CUDA_MACRO inline TF phih_stable(const TF zeta)
     {
         // Hogstrom, 1988
-        return TF(1.) + TF(7.8)*zeta;
+        //return TF(1.) + TF(7.8)*zeta;
+
+        // Classic textbook value? Search for reg
+        return TF(1.) + TF(5.)*zeta;
     }
 
     template<typename TF>
@@ -88,7 +94,10 @@ namespace Monin_obukhov
     CUDA_MACRO inline TF psim_stable(const TF zeta)
     {
         // Hogstrom, 1988
-        return TF(-4.8)*zeta;
+        //return TF(-4.8)*zeta;
+
+        // Classic textbook value? Search for reg
+        return TF(-5.)*zeta;
     }
 
     template<typename TF>
@@ -102,7 +111,10 @@ namespace Monin_obukhov
     CUDA_MACRO inline TF psih_stable(const TF zeta)
     {
         // Hogstrom, 1988
-        return TF(-7.8)*zeta;
+        //return TF(-7.8)*zeta;
+
+        // Classic textbook value? Search for reg
+        return TF(-5.)*zeta;
     }
 
     template<typename TF>

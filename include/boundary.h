@@ -102,6 +102,7 @@ class Boundary
         TF* ustar_g;
         int* nobuk_g;
 
+        TF kev; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
     protected:
         Master& master;
         Grid<TF>& grid;

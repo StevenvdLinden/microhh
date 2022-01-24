@@ -128,7 +128,7 @@ namespace
                    TF* restrict dutot, const TF* restrict z,
                    const float* zL_sl, const float* f_sl, int* nobuk,
                    const TF z0m, const TF z0h, const TF db_ref,
-                   const int istart, const int iend, const int jstart, const int jend, const int kstart,
+                   const int istart, const int iend, const int jstart, const int jend, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                    const int icells, const int jcells, const int kk,
                    Boundary_type mbcbot, Boundary_type thermobc,
                    Boundary_cyclic<TF>& boundary_cyclic)
@@ -146,7 +146,7 @@ namespace
             for (int i=istart; i<iend; ++i)
             {
                 const int ij  = i + j*jj;
-                const int ijk = i + j*jj + kstart*kk;
+                const int ijk = i + j*jj + ksl*kk; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                 du2 = std::pow(static_cast<TF>(0.5)*(u[ijk] + u[ijk+ii]) - static_cast<TF>(0.5)*(ubot[ij] + ubot[ij+ii]), static_cast<TF>(2))
                     + std::pow(static_cast<TF>(0.5)*(v[ijk] + v[ijk+jj]) - static_cast<TF>(0.5)*(vbot[ij] + vbot[ij+jj]), static_cast<TF>(2));
                 // prevent the absolute wind gradient from reaching values less than 0.01 m/s,
@@ -176,8 +176,8 @@ namespace
                 for (int i=0; i<icells; ++i)
                 {
                     const int ij = i + j*jj;
-                    obuk [ij] = calc_obuk_noslip_flux(zL_sl, f_sl, nobuk[ij], dutot[ij], bfluxbot[ij], z[kstart]);
-                    ustar[ij] = dutot[ij] * most::fm(z[kstart], z0m, obuk[ij]);
+                    obuk [ij] = calc_obuk_noslip_flux(zL_sl, f_sl, nobuk[ij], dutot[ij], bfluxbot[ij], z[ksl]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+                    ustar[ij] = dutot[ij] * most::fm(z[ksl], z0m, obuk[ij]); //<<< Also the Obukhov length is now given for this higher level; it should not be completely different from the true surface value when in the surface layer?, 18.11.21, SvdL
                 }
         }
         else if (mbcbot == Boundary_type::Dirichlet_type && thermobc == Boundary_type::Dirichlet_type)
@@ -187,10 +187,18 @@ namespace
                 for (int i=0; i<icells; ++i)
                 {
                     const int ij  = i + j*jj;
-                    const int ijk = i + j*jj + kstart*kk;
+                    const int ijk = i + j*jj + ksl*kk;
                     const TF db = b[ijk] - bbot[ij] + db_ref;
-                    obuk [ij] = calc_obuk_noslip_dirichlet(zL_sl, f_sl, nobuk[ij], dutot[ij], db, z[kstart]);
-                    ustar[ij] = dutot[ij] * most::fm(z[kstart], z0m, obuk[ij]);
+
+                    std::printf("Going into obukhov solver...\n");
+                    std::printf("b, bbot, db_ref %f , %f , %f \n", b[ijk], bbot[ij] , db_ref);
+                    std::printf("du, db, z[ksl] %f , %f , %f \n", dutot[ij], db , z[ksl]);
+
+                    obuk [ij] = calc_obuk_noslip_dirichlet(zL_sl, f_sl, nobuk[ij], dutot[ij], db, z[ksl]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+                    ustar[ij] = dutot[ij] * most::fm(z[ksl], z0m, obuk[ij]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+
+                    std::printf("Obukhov lenght coming out %f \n", obuk[ij]);
+                    // throw std::runtime_error("Genoeg iteraties...");
                 }
         }
     }
@@ -202,7 +210,7 @@ namespace
             TF* restrict ubot , TF* restrict vbot,
             TF* restrict dutot, const TF* restrict z,
             const TF z0m,
-            const int istart, const int iend, const int jstart, const int jend, const int kstart,
+            const int istart, const int iend, const int jstart, const int jend, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
             const int icells, const int jcells, const int kk,
             Boundary_type mbcbot,
             Boundary_cyclic<TF>& boundary_cyclic)
@@ -220,7 +228,7 @@ namespace
             for (int i=istart; i<iend; ++i)
             {
                 const int ij  = i + j*jj;
-                const int ijk = i + j*jj + kstart*kk;
+                const int ijk = i + j*jj + ksl*kk; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                 du2 = std::pow(static_cast<TF>(0.5)*(u[ijk] + u[ijk+ii]) - static_cast<TF>(0.5)*(ubot[ij] + ubot[ij+ii]), static_cast<TF>(2.))
                     + std::pow(static_cast<TF>(0.5)*(v[ijk] + v[ijk+jj]) - static_cast<TF>(0.5)*(vbot[ij] + vbot[ij+jj]), static_cast<TF>(2.));
                 // prevent the absolute wind gradient from reaching values less than 0.01 m/s,
@@ -251,17 +259,18 @@ namespace
                 {
                     const int ij = i + j*jj;
                     obuk [ij] = -Constants::dbig;
-                    ustar[ij] = dutot[ij] * most::fm(z[kstart], z0m, obuk[ij]);
+                    ustar[ij] = dutot[ij] * most::fm(z[ksl], z0m, obuk[ij]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                 }
         }
     }
 
+    //<<< In this function, zsl is already passed explicitly (appears inconsistent). Simply required to change argument in function call, 18.11.21, SvdL
     template<typename TF>
     void surfm(TF* restrict ustar, TF* restrict obuk,
                TF* restrict u, TF* restrict ubot, TF* restrict ugradbot, TF* restrict ufluxbot,
                TF* restrict v, TF* restrict vbot, TF* restrict vgradbot, TF* restrict vfluxbot,
                const TF zsl, const TF z0m, const Boundary_type bcbot,
-               const int istart, const int iend, const int jstart, const int jend, const int kstart,
+               const int istart, const int iend, const int jstart, const int jend, const int kstart, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                const int icells, const int jcells, const int kk,
                Boundary_cyclic<TF>& boundary_cyclic)
     {
@@ -277,7 +286,7 @@ namespace
                 for (int i=istart; i<iend; ++i)
                 {
                     const int ij  = i + j*jj;
-                    const int ijk = i + j*jj + kstart*kk;
+                    const int ijk = i + j*jj + ksl*kk; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
 
                     // interpolate the whole stability function rather than ustar or obuk
                     ufluxbot[ij] = -(u[ijk]-ubot[ij])*static_cast<TF>(0.5)*(ustar[ij-ii]*most::fm(zsl, z0m, obuk[ij-ii]) + ustar[ij]*most::fm(zsl, z0m, obuk[ij]));
@@ -298,7 +307,7 @@ namespace
                 for (int i=istart; i<iend; ++i)
                 {
                     const int ij  = i + j*jj;
-                    const int ijk = i + j*jj + kstart*kk;
+                    const int ijk = i + j*jj + ksl*kk; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
 
                     // CvH: now, this is ugly...
                     const TF one  = static_cast<TF>(1);
@@ -356,11 +365,12 @@ namespace
             }
     }
 
+    //<<< In this function, zsl is already passed explicitly (appears inconsistent). Simply required to change argument in function call, 18.11.21, SvdL
     template<typename TF>
     void surfs(TF* restrict ustar, TF* restrict obuk, TF* restrict var,
                TF* restrict varbot, TF* restrict vargradbot, TF* restrict varfluxbot,
                const TF zsl, const TF z0m, const TF z0h, const Boundary_type bcbot,
-               const int istart, const int iend, const int jstart, const int jend, const int kstart,
+               const int istart, const int iend, const int jstart, const int jend, const int kstart, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                const int icells, const int jcells, const int kk,
                Boundary_cyclic<TF>& boundary_cyclic)
     {
@@ -374,7 +384,7 @@ namespace
                 for (int i=0; i<icells; ++i)
                 {
                     const int ij  = i + j*jj;
-                    const int ijk = i + j*jj + kstart*kk;
+                    const int ijk = i + j*jj + ksl*kk; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     varfluxbot[ij] = -(var[ijk]-varbot[ij])*ustar[ij]*most::fh(zsl, z0h, obuk[ij]);
                     // vargradbot[ij] = -varfluxbot[ij] / (kappa*z0h*ustar[ij]) * phih(zsl/obuk[ij]);
                     // use the linearly interpolated grad, rather than the MO grad,
@@ -462,6 +472,7 @@ void Boundary_surface<TF>::process_input(Input& inputin, Thermo<TF>& thermo)
 {
     z0m = inputin.get_item<TF>("boundary", "z0m", "");
     z0h = inputin.get_item<TF>("boundary", "z0h", "");
+    kev = inputin.get_item<int>("boundary", "kev", "", 0); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
 
     // crash in case fixed gradient is prescribed
     if (mbcbot == Boundary_type::Neumann_type)
@@ -471,7 +482,11 @@ void Boundary_surface<TF>::process_input(Input& inputin, Thermo<TF>& thermo)
     }
     // read the ustar value only if fixed fluxes are prescribed
     else if (mbcbot == Boundary_type::Ustar_type)
-        ustarin = inputin.get_item<TF>("boundary", "ustar", "");
+    {
+        std::string msg = "Current changes (higher MO evaluation) too tentative for prescribed ustar"; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+        throw std::runtime_error(msg); //<<< So simply throw runtime_error, 18.11.21, SvdL
+         // ustarin = inputin.get_item<TF>("boundary", "ustar", "");
+    }
 
     // process the scalars
     for (auto& it : sbc)
@@ -487,6 +502,14 @@ void Boundary_surface<TF>::process_input(Input& inputin, Thermo<TF>& thermo)
         if (it.second.bcbot == Boundary_type::Dirichlet_type && mbcbot == Boundary_type::Ustar_type)
         {
             std::string msg = "Fixed Ustar bc in combination with Dirichlet bc for scalars is not supported";
+            throw std::runtime_error(msg);
+        }
+
+
+        // crash in case of fixed momentum flux and dirichlet bc for scalar
+        if (it.second.bcbot == Boundary_type::Flux_type)
+        {
+            std::string msg = "Current changes (higher MO evaluation) too tentative for prescribed flux in scalars"; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
             throw std::runtime_error(msg);
         }
     }
@@ -645,6 +668,10 @@ void Boundary_surface<TF>::init_solver()
 {
     auto& gd = grid.get_grid_data();
 
+    const int ksl = gd.kstart + kev; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+
+    // master.print_message("Level ksl = %d \n", ksl);
+
     zL_sl.resize(nzL);
     f_sl.resize(nzL);
 
@@ -687,13 +714,13 @@ void Boundary_surface<TF>::init_solver()
     // Calculate the evaluation function.
     if (mbcbot == Boundary_type::Dirichlet_type && thermobc == Boundary_type::Flux_type)
     {
-        const TF zsl = gd.z[gd.kstart];
+        const TF zsl = gd.z[ksl]; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL.. I am quite sure this is not necessary for a mere look-up table...
         for (int n=0; n<nzL; ++n)
             f_sl[n] = zL_sl[n] * std::pow(most::fm(zsl, z0m, zsl/zL_sl[n]), 3);
     }
     else if (mbcbot == Boundary_type::Dirichlet_type && thermobc == Boundary_type::Dirichlet_type)
     {
-        const TF zsl = gd.z[gd.kstart];
+        const TF zsl = gd.z[ksl]; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL.. I am quite sure this is not necessary for a mere look-up table...
         for (int n=0; n<nzL; ++n)
             f_sl[n] = zL_sl[n] * std::pow(most::fm(zsl, z0m, zsl/zL_sl[n]), 2) / most::fh(zsl, z0h, zsl/zL_sl[n]);
     }
@@ -705,6 +732,11 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
 {
     auto& gd = grid.get_grid_data();
 
+    const int ksl = gd.kstart + kev; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+
+    // master.print_message("Level ksl = %d (second time) \n", ksl);
+    // master.print_message("Height of z[ksl] = %f \n", gd.z[ksl]);
+
     // Start with retrieving the stability information.
     if (thermo.get_switch() == "0")
     {
@@ -714,7 +746,7 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
                           fields.mp.at("u")->fld_bot.data(), fields.mp.at("v")->fld_bot.data(),
                           dutot->fld.data(), gd.z.data(),
                           z0m,
-                          gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart,
+                          gd.istart, gd.iend, gd.jstart, gd.jend, ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                           gd.icells, gd.jcells, gd.ijcells,
                           mbcbot, boundary_cyclic);
         fields.release_tmp(dutot);
@@ -734,7 +766,7 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
                 tmp->fld.data(), gd.z.data(),
                 zL_sl.data(), f_sl.data(), nobuk.data(),
                 z0m, z0h, db_ref,
-                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart,
+                gd.istart, gd.iend, gd.jstart, gd.jend, ksl,  //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                 gd.icells, gd.jcells, gd.ijcells,
                 mbcbot, thermobc, boundary_cyclic);
 
@@ -746,8 +778,8 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
     surfm(ustar.data(), obuk.data(),
           fields.mp.at("u")->fld.data(), fields.mp.at("u")->fld_bot.data(), fields.mp.at("u")->grad_bot.data(), fields.mp.at("u")->flux_bot.data(),
           fields.mp.at("v")->fld.data(), fields.mp.at("v")->fld_bot.data(), fields.mp.at("v")->grad_bot.data(), fields.mp.at("v")->flux_bot.data(),
-          gd.z[gd.kstart], z0m, mbcbot,
-          gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart,
+          gd.z[ksl], z0m, mbcbot,                       //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+          gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, ksl,  //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
           gd.icells, gd.jcells, gd.ijcells,
           boundary_cyclic);
 
@@ -755,8 +787,8 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
     {
         surfs(ustar.data(), obuk.data(), it.second->fld.data(),
               it.second->fld_bot.data(), it.second->grad_bot.data(), it.second->flux_bot.data(),
-              gd.z[gd.kstart], z0m, z0h, sbc.at(it.first).bcbot,
-              gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart,
+              gd.z[ksl], z0m, z0h, sbc.at(it.first).bcbot,  //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+              gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, ksl,  //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
               gd.icells, gd.jcells, gd.ijcells,
               boundary_cyclic);
     }

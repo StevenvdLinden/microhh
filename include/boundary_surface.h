@@ -52,6 +52,7 @@ class Boundary_surface : public Boundary<TF>
         using Boundary<TF>::obuk_g;
         using Boundary<TF>::nobuk_g;
 
+        using Boundary<TF>::kev; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
         #ifdef USECUDA
         // GPU functions and variables
         void prepare_device();
