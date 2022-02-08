@@ -165,6 +165,7 @@ namespace
                 for (int i=0; i<icells; ++i)
                 {
                     const int ij = i + j*jj;
+                    std::printf("Not sure if this calculation is correct w.r.t bluxbot\n");
                     obuk[ij] = -std::pow(ustar[ij], static_cast<TF>(3)) / (Constants::kappa<TF>*bfluxbot[ij]);
                 }
         }
@@ -176,6 +177,7 @@ namespace
                 for (int i=0; i<icells; ++i)
                 {
                     const int ij = i + j*jj;
+                    std::printf("Not sure if this calculation is correct w.r.t bluxbot\n");
                     obuk [ij] = calc_obuk_noslip_flux(zL_sl, f_sl, nobuk[ij], dutot[ij], bfluxbot[ij], z[ksl]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     ustar[ij] = dutot[ij] * most::fm(z[ksl], z0m, obuk[ij]); //<<< Also the Obukhov length is now given for this higher level; it should not be completely different from the true surface value when in the surface layer?, 18.11.21, SvdL
                 }
@@ -190,14 +192,14 @@ namespace
                     const int ijk = i + j*jj + ksl*kk;
                     const TF db = b[ijk] - bbot[ij] + db_ref;
 
-                    std::printf("Going into obukhov solver...\n");
-                    std::printf("b, bbot, db_ref %f , %f , %f \n", b[ijk], bbot[ij] , db_ref);
-                    std::printf("du, db, z[ksl] %f , %f , %f \n", dutot[ij], db , z[ksl]);
+                    // std::printf("Going into obukhov solver...\n");
+                    // std::printf("b, bbot, db_ref %f , %f , %f \n", b[ijk], bbot[ij] , db_ref);
+                    // std::printf("du, db, z[ksl] %f , %f , %f \n", dutot[ij], db , z[ksl]);
 
                     obuk [ij] = calc_obuk_noslip_dirichlet(zL_sl, f_sl, nobuk[ij], dutot[ij], db, z[ksl]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     ustar[ij] = dutot[ij] * most::fm(z[ksl], z0m, obuk[ij]); //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
 
-                    std::printf("Obukhov lenght coming out %f \n", obuk[ij]);
+                    // std::printf("Obukhov lenght coming out %f \n", obuk[ij]);
                     // throw std::runtime_error("Genoeg iteraties...");
                 }
         }
@@ -753,10 +755,12 @@ void Boundary_surface<TF>::update_bcs(Thermo<TF>& thermo)
     }
     else
     {
-        auto buoy = fields.get_tmp();
-        auto tmp = fields.get_tmp();
+        auto buoy = fields.get_tmp();   //<<< full temporary fields are reserved, but only filled with surface values
+        auto tmp = fields.get_tmp();    //<<< full temporary fields are reserved, but only filled with surface values
 
-        thermo.get_buoyancy_surf(*buoy, false);
+        thermo.get_buoyancy_surf(*buoy, false); //<<< this one calculates bbot and bfluxbot. not sure if bfluxbot is correct, bbot reasonably is (not affected by moisture), 03.02.22, SvdL
+        thermo.get_thermo_field(*buoy, "b", false, false); //<<< use standard function to calculate whole buoyancy field; the one calculated in the function above is incorrect/restricted, 03.02.22, SvdL
+
         const TF db_ref = thermo.get_db_ref();
 
         stability(
