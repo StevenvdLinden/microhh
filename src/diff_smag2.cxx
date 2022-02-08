@@ -51,7 +51,7 @@ namespace
                       TF* restrict ustar, TF* restrict obuk,
                       const TF* restrict z, const TF* restrict dzi, const TF* restrict dzhi,
                       const TF dxi, const TF dyi,
-                      const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+                      const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                       const int jj, const int kk)
     {
         const int ii = 1;
@@ -83,8 +83,9 @@ namespace
                                    + TF(0.125)*fm::pow2((u[ijk   +jj]-u[ijk      ])*dyi  + (v[ijk   +jj]-v[ijk-ii+jj])*dxi)
                                    + TF(0.125)*fm::pow2((u[ijk+ii+jj]-u[ijk+ii   ])*dyi  + (v[ijk+ii+jj]-v[ijk   +jj])*dxi)
 
+                                   //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                                    // du/dz
-                                   + TF(0.5)*fm::pow2(TF(-0.5)*(ufluxbot[ij]+ufluxbot[ij+ii])/(Constants::kappa<TF>*z[kstart]*ustar[ij])*most::phim(z[kstart]/obuk[ij]))
+                                   + TF(0.5)*fm::pow2(TF(-0.5)*(ufluxbot[ij]+ufluxbot[ij+ii])/(Constants::kappa<TF>*z[ksl]*ustar[ij])*most::phim(z[ksl]/obuk[ij]))
 
                                    // dw/dx
                                    + TF(0.125)*fm::pow2((w[ijk      ]-w[ijk-ii   ])*dxi)
@@ -92,8 +93,9 @@ namespace
                                    + TF(0.125)*fm::pow2((w[ijk   +kk]-w[ijk-ii+kk])*dxi)
                                    + TF(0.125)*fm::pow2((w[ijk+ii+kk]-w[ijk   +kk])*dxi)
 
+                                   //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                                    // dv/dz
-                                   + TF(0.5)*fm::pow2(TF(-0.5)*(vfluxbot[ij]+vfluxbot[ij+jj])/(Constants::kappa<TF>*z[kstart]*ustar[ij])*most::phim(z[kstart]/obuk[ij]))
+                                   + TF(0.5)*fm::pow2(TF(-0.5)*(vfluxbot[ij]+vfluxbot[ij+jj])/(Constants::kappa<TF>*z[ksl]*ustar[ij])*most::phim(z[ksl]/obuk[ij]))
 
                                    // dw/dy
                                    + TF(0.125)*fm::pow2((w[ijk      ]-w[ijk-jj   ])*dyi)
@@ -151,7 +153,7 @@ namespace
                             TF* restrict ufluxbot, TF* restrict vfluxbot,
                             const TF* restrict z, const TF* restrict dz, const TF* restrict dzhi, const TF z0m,
                             const TF dx, const TF dy, const TF zsize, const TF cs, const TF visc,
-                            const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+                            const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                             const int icells, const int jcells, const int ijcells,
                             Boundary_cyclic<TF>& boundary_cyclic)
     {
@@ -234,7 +236,7 @@ namespace
                     const TF* restrict z, const TF* restrict dz, const TF* restrict dzi,
                     const TF dx, const TF dy,
                     const TF z0m, const TF cs, const TF tPr,
-                    const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend,
+                    const int istart, const int iend, const int jstart, const int jend, const int kstart, const int kend, const int ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     const int icells, const int jcells, const int ijcells,
                     Boundary_cyclic<TF>& boundary_cyclic)
     {
@@ -256,7 +258,7 @@ namespace
                         const int ijk = i + j*jj + k*kk;
                         // Add the buoyancy production to the TKE
                         TF RitPrratio = N2[ijk] / evisc[ijk] / tPr;
-                        RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
+                        RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall*Constants::dsmall));
                         evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                     }
             }
@@ -295,8 +297,8 @@ namespace
                     const int ijk = i + j*jj + kstart*kk;
                     // TODO use the thermal expansion coefficient from the input later, what to do if there is no buoyancy?
                     // Add the buoyancy production to the TKE
-                    TF RitPrratio = -bfluxbot[ij]/(Constants::kappa<TF>*z[kstart]*ustar[ij])*most::phih(z[kstart]/obuk[ij]) / evisc[ijk] / tPr;
-                    RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
+                    TF RitPrratio = -bfluxbot[ij]/(Constants::kappa<TF>*z[ksl]*ustar[ij])*most::phih(z[ksl]/obuk[ij]) / evisc[ijk] / tPr;
+                    RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall*Constants::dsmall));
                     evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                 }
             }
@@ -315,7 +317,7 @@ namespace
                         const int ijk = i + j*jj + k*kk;
                         // Add the buoyancy production to the TKE
                         TF RitPrratio = N2[ijk] / evisc[ijk] / tPr;
-                        RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall));
+                        RitPrratio = std::min(RitPrratio, TF(1.-Constants::dsmall*Constants::dsmall));
                         evisc[ijk] = fac * std::sqrt(evisc[ijk]) * std::sqrt(TF(1.)-RitPrratio);
                     }
             }
@@ -943,6 +945,8 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
 {
     auto& gd = grid.get_grid_data();
 
+    const int ksl = gd.kstart + boundary.kev; //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
+
     // Calculate strain rate using MO for velocity gradients lowest level.
     if (boundary.get_switch() == "surface" || boundary.get_switch() == "surface_bulk")
         calc_strain2<TF, Surface_model::Enabled>(
@@ -951,7 +955,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                 fields.mp.at("u")->flux_bot.data(), fields.mp.at("v")->flux_bot.data(),
                 boundary.ustar.data(), boundary.obuk.data(),
                 gd.z.data(), gd.dzi.data(), gd.dzhi.data(), 1./gd.dx, 1./gd.dy,
-                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl,
                 gd.icells, gd.ijcells);
 
     // Calculate strain rate using resolved boundaries.
@@ -962,7 +966,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                 fields.mp.at("u")->flux_bot.data(), fields.mp.at("v")->flux_bot.data(),
                 nullptr, nullptr,
                 gd.z.data(), gd.dzi.data(), gd.dzhi.data(), 1./gd.dx, 1./gd.dy,
-                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl,
                 gd.icells, gd.ijcells);
 
     // Start with retrieving the stability information
@@ -976,7 +980,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     fields.mp.at("u")->flux_bot.data(), fields.mp.at("v")->flux_bot.data(),
                     gd.z.data(), gd.dz.data(), gd.dzhi.data(), boundary.z0m,
                     gd.dx, gd.dy, gd.zsize, this->cs, fields.visc,
-                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
 
@@ -988,7 +992,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     fields.mp.at("u")->flux_bot.data(), fields.mp.at("v")->flux_bot.data(),
                     gd.z.data(), gd.dz.data(), gd.dzhi.data(), boundary.z0m,
                     gd.dx, gd.dy, gd.zsize, this->cs, fields.visc,
-                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
     }
@@ -1011,7 +1015,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     gd.z.data(), gd.dz.data(), gd.dzi.data(),
                     gd.dx, gd.dy,
                     boundary.z0m, this->cs, this->tPr,
-                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
         else
@@ -1023,7 +1027,7 @@ void Diff_smag2<TF>::exec_viscosity(Thermo<TF>& thermo)
                     gd.z.data(), gd.dz.data(), gd.dzi.data(),
                     gd.dx, gd.dy,
                     boundary.z0m, this->cs, this->tPr,
-                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
+                    gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend, ksl, //<<< Use higher level in flow for MO-evaluation ksl = kstart + keval, 18.11.21, SvdL
                     gd.icells, gd.jcells, gd.ijcells,
                     boundary_cyclic);
 
