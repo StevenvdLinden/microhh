@@ -64,8 +64,9 @@ namespace
                 for (int i=istart; i<iend; ++i)
                 {
                     const int ijk = i + j*jj + k*kk;
-                    const TF a_new = a[ijk] + dt*at[ijk];
-                    at[ijk] += (a_new < TF(0.)) ? -a_new * dti : TF(0.);
+                    //const TF a_new = a[ijk] + dt*at[ijk];
+                    //at[ijk] += (a_new < TF(0.)) ? -a_new * dti : TF(0.);
+		    at[ijk] -= at[ijk]; // SvdLinden, 03.06.22: "misuse" the limiter to cancel all other tendencies on scalars, making them constant in time 
                 }
     }
 }
