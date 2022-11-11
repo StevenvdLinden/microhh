@@ -54,6 +54,9 @@ void Limiter<TF>::create(Stats<TF>& stats)
 {
     for (const std::string& s : limit_list)
         stats.add_tendency(*fields.at.at(s), "z", tend_name, tend_longname);
+
+    if (sw_min)
+        stats.add_tendency(*fields.st.st("sgstke12"), "z", tend_name, tend_longname);
 }
 
 namespace
@@ -121,10 +124,15 @@ void Limiter<TF>::exec(double dt, Stats<TF>& stats)
     }
 
     if (sw_min)
+    {
         tendency_enforce_minimum<TF>(
                 fields.at.at("sgstke12")->fld.data(), fields.ap.at("sgstke12")->fld.data(), dt, Constants::sgstke12_min<TF>,
                 gd.istart, gd.iend, gd.jstart, gd.jend, gd.kstart, gd.kend,
                 gd.icells, gd.ijcells);
+
+        stats.calc_tend(*fields.st.st("sgstke12"), tend_name);        
+
+    }
 }
 #endif
 
