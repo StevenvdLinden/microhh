@@ -20,6 +20,7 @@
  * along with MicroHH.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <unistd.h> //<< for DEBUG, SVDL
 #include <iostream>
 #include <cmath>
 #include <algorithm>
@@ -93,16 +94,17 @@ namespace
         const TF dx, const TF dy, const std::vector<TF>& dz, 
         const int istart, const int jstart, const int kstart,
         const int iend,   const int jend,   const int kend,
-        const int icells, const int ijcells)
+        const int icells, const int ijcells,
+        const int mpi_offset_x, const int mpi_offset_y)
     {
 
         for (int nn=0; nn<n_fpoints; ++nn)
         {
-
+            
             const TF xi = xi_fp[nn];
             const TF yi = yi_fp[nn];
             const TF zi = zi_fp[nn];
-
+ 
             // Vectors including all neighbours outside IB and not in collection forcing points 
             std::vector<Neighbour<TF>> u_neighbours; // neighbouring u-momentum grid points of current (xi,yi,zi) point
             std::vector<Neighbour<TF>> v_neighbours; // idem for v
@@ -122,12 +124,13 @@ namespace
             // const int in_c = static_cast<int>(std::floor(xi/dx)) + istart; 
             // const int jn_c = static_cast<int>(std::floor(yi/dy)) + jstart; 
 
-            const int in_c = static_cast<int>(std::round(xi/dx)) + istart; 
-            const int jn_c = static_cast<int>(std::round(yi/dy)) + jstart; 
+            // SvdL, 25-07-2024: FORGOT the MPI offset, which is need to make grid search LOCAL
+            const int in_c = static_cast<int>(std::round(xi/dx)) + istart - mpi_offset_x; 
+            const int jn_c = static_cast<int>(std::round(yi/dy)) + jstart - mpi_offset_y; 
             int kn_c = kstart;
 
-            const int in_f = static_cast<int>(std::round(xi/dx)) + istart; // face position used for u points
-            const int jn_f = static_cast<int>(std::round(yi/dy)) + jstart; // face position used for v points
+            const int in_f = static_cast<int>(std::round(xi/dx)) + istart - mpi_offset_x; // face position used for u points
+            const int jn_f = static_cast<int>(std::round(yi/dy)) + jstart - mpi_offset_y; // face position used for v points
             int kn_f = kstart;                                             // face position used for w points
 
             for (int k=kstart; k<kend-1; ++k)
@@ -176,9 +179,9 @@ namespace
                 for (int dj=-1; dj<2; ++dj)
                     for (int di=-1; di<2; ++di)
                     {
-                        const int ijk_test = (in_f+di) + (jn_c+dj)*icells + (kn_c+dk)*ijcells;
-                        bool ijk_in_fp = (std::find(ijk_fp_u.begin(), ijk_fp_u.end(), ijk_test) != ijk_fp_u.end()); 
-                        bool ijk_in_ib = (std::find(ijk_ib_u.begin(), ijk_ib_u.end(), ijk_test) != ijk_ib_u.end());
+                        const int ijk_test = (in_f+di) + (jn_c+dj)*icells + (kn_c+dk)*ijcells; //<< SvdL, 25-07-2024: ijcells is including the ghostcells..
+                        bool ijk_in_fp = (std::find(ijk_fp_u.begin(), ijk_fp_u.end(), ijk_test) != ijk_fp_u.end()); //<< SvdL, 25-07-2024: only tests in fp and ib points on current MPI task, should test on all tasks! 
+                        bool ijk_in_ib = (std::find(ijk_ib_u.begin(), ijk_ib_u.end(), ijk_test) != ijk_ib_u.end()); //<< THIS IS THEREFORE WRONG... should automatically be solved with signed distance function (test on positive value)
 
                         // Check if selected grid point is both not a Forcing Point and outside IB.
                         if ( !ijk_in_fp && !ijk_in_ib ) 
@@ -189,9 +192,21 @@ namespace
                         }
                     }
 
+            // SvdL, 25-07-2024: used for testing, keep for now...
+            // if (u_neighbours.empty()) 
+            // { 
+            //     std::cout << "in_f " << in_f << std::endl; 
+            //     std::cout << "jn_c " << jn_c << std::endl; 
+            //     std::cout << "kn_c " << kn_c << std::endl; 
+            //     // std::cout << "ijk_test " << ijk_test << std::endl; 
+            //     std::cout << "ijk_in_fp " << ijk_in_fp << std::endl; 
+            //     std::cout << "ijk_in_ib " << ijk_in_ib << std::endl; 
+            //     std::cout << "Vector is empty" << std::endl; 
+            // } 
+
             // Sort them on distance
             std::sort(u_neighbours.begin(), u_neighbours.end(), compare_value<TF>);
-            
+
             // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest is set to zero weight.
             if (u_neighbours[0].distance < TF(1e-7))
             {
@@ -1087,6 +1102,16 @@ Immersed_boundary<TF>::Immersed_boundary(Master &masterin, Grid<TF> &gridin, Fie
 
         // Set available masks
         available_masks.insert(available_masks.end(), {"ib"});
+
+        // SvdL, 24-07-2024: no check if same scalars are defined in [fields].. they should be AND the order should match
+        // If scalars are present (excl. temperature), read in corresponding boundary type
+        if (fields.sp.size() > 0)
+        {
+            swbotlist = inputin.get_list<std::string>("IB", "swbotlist", "");
+
+            if (swbotlist.size() != fields.sp.size())
+                throw std::runtime_error("Number of given boundary types does not equal number of scalars.");
+        }
     }
 }
 
@@ -1233,9 +1258,9 @@ void Immersed_boundary<TF>::exec(const double dt)
         dt);
 
     // not required here... CHECK, SvdL, 15-06-2023
-    // boundary_cyclic.exec(fields.mp.at("u")->fld.data());
-    // boundary_cyclic.exec(fields.mp.at("v")->fld.data());
-    // boundary_cyclic.exec(fields.mp.at("w")->fld.data());
+    // boundary_cyclic.exec(fields.mt.at("u")->fld.data());
+    // boundary_cyclic.exec(fields.mt.at("v")->fld.data());
+    // boundary_cyclic.exec(fields.mt.at("w")->fld.data());
 
     for (auto &it : fields.sp) // SvdL, 21-05-2023: waarom staat hier een & voor it?
     {
@@ -1255,11 +1280,12 @@ void Immersed_boundary<TF>::exec(const double dt)
             fpoints.at("s").db.data(),                                                                      // distance nearest immersed boundary point to forcing point
             fpoints.at("s").di.data(),                                                                      // distance interpolation point to forcing point
             fpoints.at("s").z0b.data(),                                                                     // local roughness lengths of forcing points (all scalars will have same for now..)
-            sbcbot,                                                                                         // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
+            sbc.at(it.first),                                                                                         // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
             fields.visc, fpoints.at("s").i.size(), n_idw_points,
             gd.icells, gd.ijcells,
             dt);
 
+        // SvdL, 24-07-2024, backup function above: sbcbot,       // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
         // SvdL, 14-06-2023: the value to force inside still has to be set properly..
         set_ib_points(
             fields.st.at(it.first)->fld.data(),
@@ -1270,6 +1296,7 @@ void Immersed_boundary<TF>::exec(const double dt)
 
         // not required here... CHECK, SvdL, 15-06-2023
         // boundary_cyclic.exec(it.second->fld.data());
+        // boundary_cyclic.exec(fields.st.at(it.first)->fld.data());
     }
 
     // SvdL, 21-05-203: plans for much much later... allowing for IB conditions to be updated
@@ -1285,8 +1312,8 @@ void Immersed_boundary<TF>::init(Input &inputin, Cross<TF> &cross)
     if (sw_ib == IB_type::Disabled)
         return;
 
-    // SvdL, 24-05-2023: for now set this to Dirichlet for all scalars.. eventually put this in the fpoints structure per scalar.
-    sbcbot = Boundary_type::Dirichlet_type;
+    // // SvdL, 24-05-2023: for now set this to Dirichlet for all scalars.. eventually put this in the fpoints structure per scalar.
+    // sbcbot = Boundary_type::Dirichlet_type;
 
     // Initialize structures for forcing points
     fpoints.emplace("u", Forcing_points<TF>());
@@ -1294,32 +1321,36 @@ void Immersed_boundary<TF>::init(Input &inputin, Cross<TF> &cross)
     fpoints.emplace("w", Forcing_points<TF>());
     fpoints.emplace("s", Forcing_points<TF>()); //<< always initialize one for scalars (eddy diffusivity is at this location)
 
-    // Process the boundary conditions for scalars
-    // if (fields.sp.size() > 0)
-    // {
-    //     // All scalars have the same boundary type (for now)
-    //     std::string swbot = inputin.get_item<std::string>("IB", "sbcbot", "");
+    // TENTATIVE SvdL, 23-07-2024: fix placement of different scalar fields (incl. temperature later). Currently, not expected to work for thermo
+    // DEFINITELY NOT THE NICEST IMPLEMENTATION... I JUST ASSUME ALSO THAT ORDERING OF SCALAR FIELDS IS EQUAL TO READ IN OF SWBOTLIST
+    if (fields.sp.size() > 0)
+    {   
+        int n = 0;
 
-    //     if (swbot == "flux")
-    //         sbcbot = Boundary_type::Flux_type;
-    //     else if (swbot == "dirichlet")
-    //         sbcbot = Boundary_type::Dirichlet_type;
-    //     else if (swbot == "neumann")
-    //         sbcbot = Boundary_type::Neumann_type;
-    //     else
-    //     {
-    //         std::string error = "IB sbcbot=" + swbot + " is not a valid choice (options: dirichlet, neumann, flux)";
-    //         throw std::runtime_error(error);
-    //     }
+        for (auto &scalar : fields.sp)
+        {   
 
-    //     // Process boundary values per scalar
-    //     for (auto& it : fields.sp)
-    //         sbc.emplace(it.first, inputin.get_item<TF>("IB", "sbot", it.first));
+            std::string swbot = swbotlist[n];
 
-    //     // Read the scalars with spatial patterns
-    //     sbot_spatial_list = inputin.get_list<std::string>("IB", "sbot_spatial", "", std::vector<std::string>());
-    // }
+            if (swbot == "flux")
+                sbcbot = Boundary_type::Flux_type;
+            else if (swbot == "dirichlet")
+                sbcbot = Boundary_type::Dirichlet_type;
+            else if (swbot == "neumann")
+                sbcbot = Boundary_type::Neumann_type;
+            else
+            {
+                std::string error = "IB sbcbot=" + swbot + " is not a valid choice (options: dirichlet, neumann, flux)";
+                throw std::runtime_error(error);
+            }    
 
+            sbc.emplace(scalar.first, sbcbot);
+            fpoints.at("s").sbot.emplace(scalar.first, std::vector<TF>()); 
+
+            ++n;
+        }
+    }
+    
     // SvdL, 22-05-2023: niet geheel duidelijk wat dit nu doet..
     // Check input list of cross variables (crosslist)
     // std::vector<std::string>& crosslist_global = cross.get_crosslist();
@@ -1378,6 +1409,15 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
         const int j1 = mpi_offset_y + gd.jgc + gd.jmax;
 
         const int rdim = 9;
+
+        //         // For Debugging, SvdL 24 juli 2024
+        // volatile int i = 0;
+        // char hostname[256];
+        // gethostname(hostname, sizeof(hostname));
+        // printf("PID %d on %s ready for attach\n", getpid(), hostname);
+        // fflush(stdout);
+        // while (0 == i)
+        //     sleep(5);
 
         // Get IBM settings from NetCDF input.
         Netcdf_group &init_group = input_nc.get_group("ibm");
@@ -1439,7 +1479,7 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
             {
                 int i = i_fpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
                 int j = j_fpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-                int k = k_fpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out..
+                int k = k_fpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out.. << NO PROBABLY WRONG TO DO SO (SvdL, 25-07-2024)
 
                 // Check if grid point on this MPI task
                 if (i >= i0 && i < i1 && j >= j0 && j < j1)
@@ -1646,6 +1686,7 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
                         const int ijk = i + j*jj + k*kk;
 
                         fpoints.at("s").sbot.at(scalar.first).push_back(sbot_fpoints[nn]);
+                        
                     }
                 }
             }
@@ -1743,13 +1784,13 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
                 gd.x, gd.y, gd.z, gd.xh, gd.yh, gd.zh, gd.dx, gd.dy, gd.dz,
                 gd.istart, gd.jstart, gd.kstart,
                 gd.iend, gd.jend, gd.kend,
-                gd.icells, gd.ijcells);
+                gd.icells, gd.ijcells, 
+                mpi_offset_x, mpi_offset_y);
 
             calculate_rotation_matrix(
                 fpoints.at(it.first).rot.data(), 
                 fpoints.at(it.first).nor.data(), 
-                fpoints.at(it.first).i.size()
-            );
+                fpoints.at(it.first).i.size());
 
         }
 
@@ -1767,13 +1808,13 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
             gd.x, gd.y, gd.z, gd.xh, gd.yh, gd.zh, gd.dx, gd.dy, gd.dz,
             gd.istart, gd.jstart, gd.kstart,
             gd.iend, gd.jend, gd.kend,
-            gd.icells, gd.ijcells);
+            gd.icells, gd.ijcells,
+            mpi_offset_x, mpi_offset_y);
 
         calculate_rotation_matrix(
             fpoints.at("s").rot.data(), 
             fpoints.at("s").nor.data(), 
-            fpoints.at("s").i.size()
-            );
+            fpoints.at("s").i.size());
 
     }
 
@@ -1783,7 +1824,6 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
     //     // Print some statistics (number of ghost cells)
     //     print_statistics(ghost.at("u").i, std::string("u"), master);
 }
-
 
 // // SvdL, 18-05-2023: fix later.. for now make it BS-function
 template <typename TF>

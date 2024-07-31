@@ -184,10 +184,13 @@ class Immersed_boundary
         int n_idw_points;       // Number of interpolation points in IDW interpolation
         int n_idw_points_min;   // Minimum number of interpolation points in IDW interpolation
 
-        // Boundary conditions for scalars
+        // Boundary type for scalars
+        // SvdL, 20240724: for now, keep constant for all buildings points (later to be included in map sbot above)
         Boundary_type sbcbot;
-        std::map<std::string, TF> sbc; //<< not implemented yet
-        std::vector<std::string> sbot_spatial_list; //<< not implemented yet
+        std::vector<std::string> swbotlist; //<< list containing boundary type per scalar (later incl. temperature separately!)
+        std::map<std::string, Boundary_type> sbc; //<< not implemented yet
+        
+        // std::vector<std::string> sbot_spatial_list; //<< not implemented yet
 
         // All forcing points properties
         std::map<std::string, Forcing_points<TF>> fpoints;
