@@ -34,9 +34,9 @@ template<typename> class Fields;
 template<typename> class Cross;
 // template<typename> class Diff;
 
-enum class IB_type {Disabled, STL, User};
+enum class IB_type {Disabled, SDF};
 
-// Forcing points info on staggered grid
+// Forcing points info on staggered grid (for SDF implementation, IB_type=SDF)
 template<typename TF>
 struct Forcing_points
 {
@@ -51,6 +51,9 @@ struct Forcing_points
     std::vector<int> j;
     std::vector<int> k;
 
+    // Combined grid indices ijk for forcing point locations
+    std::vector<int> ijk;
+
     // Nearest location of IB to forcing cell:
     std::vector<TF> xb;     // size = number of forcing points
     std::vector<TF> yb;
@@ -62,12 +65,12 @@ struct Forcing_points
     std::vector<TF> zi;
 
     // Local normal vectors and surface rotation matrix:
-    std::vector<TF> nor;   // size = number of forcing points x 3
+    // std::vector<TF> nor;   // size = number of forcing points x 3
     std::vector<TF> rot;   // size = number of forcing points x 9
 
-    // Distance forcing points to immersed boundary (db) and interpolation point (di)
-    std::vector<TF> db; 
-    std::vector<TF> di; 
+    // Distance forcing points to immersed boundary (dist_b) and interpolation point (dist_i)
+    std::vector<TF> dist_b; 
+    std::vector<TF> dist_i; 
 
     // Aerodynamic roughness at immersed boundary / forcing point (can be different for momentum and scalars)
     std::vector<TF> z0b;
@@ -96,46 +99,92 @@ struct Forcing_points
     std::map<std::string, std::vector<TF>> sbot;
     std::vector<TF> mbot;
     
-    // Combined grid indices ijk for forcing point locations and locations inside the ib
-    std::vector<int> ijk_fp;
-    std::vector<int> ijk_ib;
-
-    // // SvdL, 21-05-2023: for now restrict to getting it working for CPU...
     // //
     // // GPU 
     // //
 
-    // // Indices of IB ghost points:
-    // int* i_g;
-    // int* j_g;
-    // int* k_g;
+    // Indices of the points to be forced:
+    int* i_g;     // size = number of forcing points
+    int* j_g;
+    int* k_g;
 
-    // // Nearest location of IB to ghost cell:
-    // TF* xb_g;
+    // // Combined grid indices ijk for forcing point locations
+    // int* ijk_g;
+
+    // // Nearest location of IB to forcing cell:
+    // TF* xb_g;     // size = number of forcing points
     // TF* yb_g;
     // TF* zb_g;
 
-    // // Location of interpolation point outside IB:
-    // TF* xi_g;
+    // // Location of interpolation point on normal from IB to forcing cell:
+    // TF* xi_g;     // size = number of forcing points
     // TF* yi_g;
     // TF* zi_g;
 
-    // TF* di_g;  // Distance ghost cell to interpolation point
+    // Local normal vectors and surface rotation matrix:
+    // std::vector<TF> nor;   // size = number of forcing points x 3
+    TF* rot_g;   // size = number of forcing points x 9
 
-    // // Points outside IB used for IDW interpolation:
-    // int* ip_i_g;
-    // int* ip_j_g;
-    // int* ip_k_g;
-    // TF* ip_d_g;
+    // Distance forcing points to immersed boundary (dist_b) and interpolation point (dist_i)
+    TF* dist_b_g; 
+    TF* dist_i_g; 
 
-    // // Interpolation coefficients
-    // TF* c_idw_g;
-    // TF* c_idw_sum_g;
+    // Aerodynamic roughness at immersed boundary / forcing point (can be different for momentum and scalars)
+    TF* z0b_g;
 
-    // // Spatially varying scalar (and momentum..) boundary conditions
-    // std::map<std::string, TF*> sbot_g;
-    // TF* mbot_g;
+    // Points outside IB used for IDW interpolation: //<  SvdL, 18-05-2023: remove probably the inversed distance weighting??
+    int* ip_u_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_u_j_g;
+    int* ip_u_k_g;
+    int* ip_v_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_v_j_g;
+    int* ip_v_k_g;
+    int* ip_w_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_w_j_g;
+    int* ip_w_k_g;
+    int* ip_s_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_s_j_g;
+    int* ip_s_k_g;
+
+    // Interpolation coefficients of neighbours to interpolation point: 4 vectors due to staggered grid nature.
+    TF* c_idw_u_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_v_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_w_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_s_g;     // size = number of ghost points x n_idw_points
+
+    // Spatially varying scalar (and momentum..) boundary conditions
+    std::map<std::string, TF*> sbot_g;
+    TF* mbot_g;
+    
 };
+
+template<typename TF>
+struct IB_points
+{
+    int n_ibpoints;             // number of ib points (i.e., within object)
+
+    //
+    // CPU
+    //
+
+    // Indices of the ib points:
+    std::vector<int> i;        // size = number of ib points
+    std::vector<int> j;
+    std::vector<int> k;
+    std::vector<int> ijk;
+
+    // //
+    // // GPU 
+    // //
+
+    // Indices of the points to be forced:
+    int* i_g;     // size = number of ib points
+    int* j_g;
+    int* k_g;
+    int* ijk_g;
+
+};
+
 
 // Convenience struct to simplify sorting
 template<typename TF>
@@ -158,7 +207,7 @@ class Immersed_boundary
         void create(Input&, Netcdf_handle&);
 
         void exec_viscosity();
-        void exec(const double);
+        void exec(double);
 
         void exec_cross(Cross<TF>&, unsigned long);
 
@@ -192,8 +241,9 @@ class Immersed_boundary
         
         // std::vector<std::string> sbot_spatial_list; //<< not implemented yet
 
-        // All forcing points properties
+        // All forcing points and ib properties
         std::map<std::string, Forcing_points<TF>> fpoints;
+        std::map<std::string, IB_points<TF>> ibpoints;
 
         // Statistics
         std::vector<std::string> available_masks;
@@ -201,8 +251,8 @@ class Immersed_boundary
         // Cross-sections
         std::vector<std::string> crosslist;
 
-        // SvdL, 23-05-2023: I assume this can be a private member.. anyway still implement
-        // void process_ibm_input(Input&, Netcdf_handle&); 
+        // Additional parameters for ib
+        TF z0bound;
 };
 
 #endif

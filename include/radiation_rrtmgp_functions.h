@@ -36,7 +36,7 @@
 
 //#include "constants.h"
 //#include "fast_math.h"
-#include "Types.h"
+#include "types.h"
 
 namespace Radiation_rrtmgp_functions
 {

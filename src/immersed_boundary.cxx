@@ -35,11 +35,13 @@
 #include "stats.h"
 #include "netcdf_interface.h"
 #include "cross.h"
+#include "finite_difference.h"
 
+using namespace Finite_difference::O2;
 namespace
 {
     namespace fm = Fast_math;
-
+    
     template<typename TF>
     TF absolute_distance(
             const TF x1, const TF y1, const TF z1,
@@ -55,7 +57,7 @@ namespace
         return a.distance < b.distance;
     }
 
-    // // SvdL, geen idee waar deze voor nodig is...
+    // // SvdL, 20240918: commented out for now, original use unclear
     // bool has_ending(const std::string& full_string, const std::string& ending)
     // {
     //     if (full_string.length() >= ending.length())
@@ -63,75 +65,60 @@ namespace
     //     else
     //         return false;
     // };
-
-    // void print_statistics(std::vector<int> &ghost_i, std::string name, Master &master)
-    // {
-    //     int nghost = ghost_i.size();
-    //     master.sum(&nghost, 1);
-
-    //     if (master.get_mpiid() == 0)
-    //     {
-    //         std::string message = "Found: " + std::to_string(nghost) + " IB ghost cells at the " + name + " location";
-    //         master.print_message(message);
-    //     }
-    // }
-
-    // Note 13-06-2023: er moet hier een loop overheen voor alle xi, yi, zi punten..
+        
     template <typename TF>
     void setup_interpolation(
-        const TF* const restrict xi_fp, const TF* const restrict yi_fp, const TF* const restrict zi_fp,             // location of interpolation point
-        int* const restrict ipui, int* const restrict ipuj, int* const restrict ipuk, TF* const restrict c_idw_u,   // indices of interpolation locations + weights
-        int* const restrict ipvi, int* const restrict ipvj, int* const restrict ipvk, TF* const restrict c_idw_v, 
-        int* const restrict ipwi, int* const restrict ipwj, int* const restrict ipwk, TF* const restrict c_idw_w,
-        int* const restrict ipsi, int* const restrict ipsj, int* const restrict ipsk, TF* const restrict c_idw_s, 
-        const std::vector<int>& ijk_fp_u, const std::vector<int>& ijk_ib_u, // these are vectors that contain the ijk combined indices of the forcing points and ib points per grid position
-        const std::vector<int>& ijk_fp_v, const std::vector<int>& ijk_ib_v, 
-        const std::vector<int>& ijk_fp_w, const std::vector<int>& ijk_ib_w,  
-        const std::vector<int>& ijk_fp_s, const std::vector<int>& ijk_ib_s,  
-        const int n_fpoints, const int n_idw_loc_min, const int n_idw_loc,
+        std::vector<TF>& xi_fp, std::vector<TF>& yi_fp, std::vector<TF>& zi_fp,                             // location of interpolation point
+        std::vector<int>& ipui, std::vector<int>& ipuj, std::vector<int>& ipuk, std::vector<TF>& c_idw_u,   // indices of interpolation locations + weights
+        std::vector<int>& ipvi, std::vector<int>& ipvj, std::vector<int>& ipvk, std::vector<TF>& c_idw_v, 
+        std::vector<int>& ipwi, std::vector<int>& ipwj, std::vector<int>& ipwk, std::vector<TF>& c_idw_w,
+        std::vector<int>& ipsi, std::vector<int>& ipsj, std::vector<int>& ipsk, std::vector<TF>& c_idw_s,  
+        std::vector<int>& i_fp, std::vector<int>& j_fp, std::vector<int>& k_fp,                             // grid locations of points to be forced
+        const int n_fpoints, const int n_idw_points, const int n_idw_points_min,
+        TF* const restrict sdfu, TF* const restrict sdfv, TF* const restrict sdfw, TF* const restrict sdfs, // SDFs for all grid locations
         const std::vector<TF>& x, const std::vector<TF>& y, const std::vector<TF>& z, 
         const std::vector<TF>& xh, const std::vector<TF>& yh, const std::vector<TF>& zh,
-        const TF dx, const TF dy, const std::vector<TF>& dz, 
+        const TF dx, const TF dy, 
+        const std::vector<TF>& dz, const std::vector<TF>& dzh, 
         const int istart, const int jstart, const int kstart,
         const int iend,   const int jend,   const int kend,
-        const int icells, const int ijcells,
-        const int mpi_offset_x, const int mpi_offset_y)
+        const int icells, const int ijcells)
     {
+
+        TF c_idw_sum = TF(0.);
 
         for (int nn=0; nn<n_fpoints; ++nn)
         {
-            
             const TF xi = xi_fp[nn];
             const TF yi = yi_fp[nn];
             const TF zi = zi_fp[nn];
- 
-            // Vectors including all neighbours outside IB and not in collection forcing points 
+
+            const int kfp = k_fp[nn];
+
+            // Calculate Delta as "originally" used at forcing point location (should be fine as long as stretching is not too strong)
+            const TF Delta  = std::pow(dx*dy*dzh[kfp], TF(1./3.));  // for center positions (mind use of dzh for center position -> see grid definitions)
+            const TF Deltah = std::pow(dx*dy* dz[kfp], TF(1./3.));  // for face positions (idem here)
+
+            // Maximum distance allowed for use in inverse distance interpolation (aim to keep interpolation as local as possible)
+            const TF dist_max  = TF(2.)*Delta;  //<< value of 2 should be well within range of identified potential neighbours (see below)
+            const TF dist_maxh = TF(2.)*Deltah; //<< value of 2 should be well within range of identified potential neighbours (see below)
+
+            // Vectors including all neighbours around interpolation point
             std::vector<Neighbour<TF>> u_neighbours; // neighbouring u-momentum grid points of current (xi,yi,zi) point
             std::vector<Neighbour<TF>> v_neighbours; // idem for v
             std::vector<Neighbour<TF>> w_neighbours; // idem for w
             std::vector<Neighbour<TF>> s_neighbours; // idem for scalars
 
-            TF dist_max  = TF(0.); 
-            TF c_idw_sum = TF(0.);
+            // Calculate "semi-nearest" grid indices (i,j) of interpolation point (xi,yi,zi) 
+            const int in  = static_cast<int>(std::round( (xi-x[istart]) / dx) ) + istart; // guess of center index i
+            const int jn  = static_cast<int>(std::round( (yi-y[istart]) / dy) ) + jstart; // guess of center index j
+           
+            const int inh = static_cast<int>(std::round( (xi-xh[istart]) / dx) ) + istart; // guess of face index i (used for u points)
+            const int jnh = static_cast<int>(std::round( (yi-yh[istart]) / dy) ) + jstart; // guess of face index j (used for v points)
 
-            // Calculate "semi-nearest" real grid positions of interpolation point (xi,yi,zi) 
-            // and subsequently search the neighbourhood for potential interpolation points
-
-            // SvdL, 29-06-2023: this is likely not the best "first" guess of the indices of the interpolation point. 
-            // there may be options to get a better initial guess, check if equal to forcing point and then shift based on normal vector direction.
-            // But this requires passing even more vectors and more computations.. easier to just extend search region itself..?
-            // --> NOTE: visualize on grid representation, floor operator should give position w.r.t. grid center, round operator w.r.t. do grid face
-            // const int in_c = static_cast<int>(std::floor(xi/dx)) + istart; 
-            // const int jn_c = static_cast<int>(std::floor(yi/dy)) + jstart; 
-
-            // SvdL, 25-07-2024: FORGOT the MPI offset, which is need to make grid search LOCAL
-            const int in_c = static_cast<int>(std::round(xi/dx)) + istart - mpi_offset_x; 
-            const int jn_c = static_cast<int>(std::round(yi/dy)) + jstart - mpi_offset_y; 
-            int kn_c = kstart;
-
-            const int in_f = static_cast<int>(std::round(xi/dx)) + istart - mpi_offset_x; // face position used for u points
-            const int jn_f = static_cast<int>(std::round(yi/dy)) + jstart - mpi_offset_y; // face position used for v points
-            int kn_f = kstart;                                             // face position used for w points
+            // Do slightly different procedure for k (in case of stretched grid)
+            int kn  = kstart;   // guess of center index k
+            int knh = kstart;   // guess of face index k (used for w points)
 
             for (int k=kstart; k<kend-1; ++k)
             {
@@ -139,11 +126,11 @@ namespace
                 {
                     if ((z[k]-zi) < (z[k+1]-zi))
                     {
-                        kn_c = k; 
+                        kn = k; 
                     }
                     else
                     {
-                        kn_c = k+1; 
+                        kn = k+1; 
                     }
                     break;
                 }
@@ -155,54 +142,43 @@ namespace
                 {
                     if ((zh[k]-zi) < (zh[k+1]-zi))
                     {
-                        kn_f = k; 
+                        knh = k; 
                     }
                     else
                     {
-                        kn_f = k+1; 
+                        knh = k+1; 
                     }
                     break;
                 }
             }
 
             // Limit vertical stencil near surface (interpolation locations may not be below surface)
-            const int dk0_c = std::max(-1, kstart-kn_c);
-            const int dk0_f = std::max(-1, kstart-kn_f);
+            const int dk0  = std::max(-2, kstart-kn);
+            const int dk0h = std::max(-2, kstart-knh);
 
-            // 1. do for uloc
+            // Search for potential neighbours (at u, v, w and center positions) for all forcing points
+            // --> availability of SDF enables to explicitly test if potential neighbour is (another) forcing cell to be skipped
+            // --> also, enables to preselect points that are not too far from forcing point (e.g., within 4*Delta)
 
-            dist_max  = 0.; // reset to zero
+            // 1. Do for uloc
+
             c_idw_sum = 0.; // reset to zero
 
-            // Find neighbouring grid points outside IB 
-            for (int dk=dk0_c; dk<2; ++dk)
-                for (int dj=-1; dj<2; ++dj)
-                    for (int di=-1; di<2; ++di)
+            // Find neighbouring grid points outside IB (use rather wide search region)
+            for (int dk=dk0; dk<3; ++dk)
+                for (int dj=-2; dj<3; ++dj)
+                    for (int di=-2; di<3; ++di)
                     {
-                        const int ijk_test = (in_f+di) + (jn_c+dj)*icells + (kn_c+dk)*ijcells; //<< SvdL, 25-07-2024: ijcells is including the ghostcells..
-                        bool ijk_in_fp = (std::find(ijk_fp_u.begin(), ijk_fp_u.end(), ijk_test) != ijk_fp_u.end()); //<< SvdL, 25-07-2024: only tests in fp and ib points on current MPI task, should test on all tasks! 
-                        bool ijk_in_ib = (std::find(ijk_ib_u.begin(), ijk_ib_u.end(), ijk_test) != ijk_ib_u.end()); //<< THIS IS THEREFORE WRONG... should automatically be solved with signed distance function (test on positive value)
+                        const int ijk_test = (inh+di) + (jn+dj)*icells + (kn+dk)*ijcells; // combined grid index to test
+                        
+                        if (sdfu[ijk_test] < Delta || sdfu[ijk_test] > TF(4.)*Delta)
+                            continue;
 
-                        // Check if selected grid point is both not a Forcing Point and outside IB.
-                        if ( !ijk_in_fp && !ijk_in_ib ) 
-                        {
-                            const TF distance = absolute_distance(xi, yi, zi, xh[in_f+di], y[jn_c+dj], z[kn_c+dk]);
-                            Neighbour<TF> tmp_neighbour = {in_f+di, jn_c+dj, kn_c+dk, distance};
-                            u_neighbours.push_back(tmp_neighbour);
-                        }
+                        const TF distance = absolute_distance(xi, yi, zi, xh[inh+di], y[jn+dj], z[kn+dk]);
+                        Neighbour<TF> tmp_neighbour = {inh+di, jn+dj, kn+dk, distance};
+                        u_neighbours.push_back(tmp_neighbour);
+                        
                     }
-
-            // SvdL, 25-07-2024: used for testing, keep for now...
-            // if (u_neighbours.empty()) 
-            // { 
-            //     std::cout << "in_f " << in_f << std::endl; 
-            //     std::cout << "jn_c " << jn_c << std::endl; 
-            //     std::cout << "kn_c " << kn_c << std::endl; 
-            //     // std::cout << "ijk_test " << ijk_test << std::endl; 
-            //     std::cout << "ijk_in_fp " << ijk_in_fp << std::endl; 
-            //     std::cout << "ijk_in_ib " << ijk_in_ib << std::endl; 
-            //     std::cout << "Vector is empty" << std::endl; 
-            // } 
 
             // Sort them on distance
             std::sort(u_neighbours.begin(), u_neighbours.end(), compare_value<TF>);
@@ -210,397 +186,460 @@ namespace
             // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest is set to zero weight.
             if (u_neighbours[0].distance < TF(1e-7))
             {
+                ipui[nn*n_idw_points]    = u_neighbours[0].i;
+                ipuj[nn*n_idw_points]    = u_neighbours[0].j;
+                ipuk[nn*n_idw_points]    = u_neighbours[0].k;
+                c_idw_u[nn*n_idw_points] = TF(1.);  
 
-                ipui[nn*n_idw_loc]    = u_neighbours[0].i;
-                ipuj[nn*n_idw_loc]    = u_neighbours[0].j;
-                ipuk[nn*n_idw_loc]    = u_neighbours[0].k;
-                c_idw_u[nn*n_idw_loc] = TF(1.);  
-
-                for (int ii=1; ii<n_idw_loc; ++ii)
+                for (int ii=1; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; // index gives position in vectors
+                    const int in = ii + nn*n_idw_points; // index gives position in vectors
 
-                    ipui[in]    = in_f;   // just a "FillValue", make sure it carries weight ZERO
-                    ipuj[in]    = jn_c;
-                    ipuk[in]    = kn_c;
-                    c_idw_u[in] = TF(0.); // set weights here to ZERO
+                    ipui[in]    = inh;      // just a "FillValue", make sure it carries weight ZERO
+                    ipuj[in]    = jn;
+                    ipuk[in]    = kn;
+                    c_idw_u[in] = TF(0.);   // set weights here to ZERO
                 }
             }
             else
             {
-                if (u_neighbours.size() < n_idw_loc_min)
+                if (u_neighbours.size() < n_idw_points_min)
                 {
-                    std::cout << "ERROR: only found " << u_neighbours.size() << " s interpolation points around (less than minimum) ";
+                    std::cout << "ERROR: only found " << u_neighbours.size() << " u interpolation points around (less than minimum) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                     throw 1;
                 }
-                else if (u_neighbours.size() < n_idw_loc)
+                else if (u_neighbours.size() < n_idw_points)
                 {
-                    std::cout << "NOTE: only found " << u_neighbours.size() << " s interpolation points around (less than maximum allowed) ";
+                    std::cout << "NOTE: only found " << u_neighbours.size() << " u interpolation points around (less than maximum allowed) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                 }
 
-                // maximum distance in valid neighbours is available here.
-                dist_max = u_neighbours[u_neighbours.size()-1].distance;
-                
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; // index represent number of Forcing Points for this variable (gives position in vector)
+                    const int in = ii + nn*n_idw_points; // index represent number of Forcing Points for this variable (gives position in vector)
                     if (ii < u_neighbours.size())
                     {   
                         ipui[in]    = u_neighbours[ii].i;
                         ipuj[in]    = u_neighbours[ii].j;
                         ipuk[in]    = u_neighbours[ii].k;
-                        c_idw_u[in] = std::pow((dist_max - u_neighbours[ii].distance) / (dist_max * u_neighbours[ii].distance), TF(0.5)) + TF(1e-9); 
-                        // SvdL, 12-06-2023: Question: why add the 1e-9 ? And final point always gets weight zero as well (such that it is a wasted point). 
-                        // Shouldn't we then increase n_iwd and/or n_idw_loc_max by 1 to account for this?
+
+                        // SvdL, 20240902: using modified Shepard's Method for weights, with p=0.5 (appropriate value?)
+                        c_idw_u[in] = std::pow( std::max(TF(0.), (dist_max - u_neighbours[ii].distance)) / (dist_max * u_neighbours[ii].distance) , TF(0.5) );
                         c_idw_sum  += c_idw_u[in];
                     }
                     else
                     {
-                        ipui[in]    = in_f;   // just a "FillValue", make sure it carries weight ZERO
-                        ipuj[in]    = jn_c;
-                        ipuk[in]    = kn_c;
-                        c_idw_u[in] = TF(0.); // set weights here to ZERO
+                        ipui[in]    = inh;      // just a "FillValue", make sure it carries weight ZERO
+                        ipuj[in]    = jn;
+                        ipuk[in]    = kn;
+                        c_idw_u[in] = TF(0.);   // set weights here to ZERO
                     }
                 }
                 
                 // normalize all weights
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
+                    const int in = ii + nn*n_idw_points; 
                     c_idw_u[in] /= c_idw_sum; 
                 }
             }
 
-            // 2. do for vloc
+            // 2. Do for vloc
 
-            dist_max  = 0.; // reset to zero
             c_idw_sum = 0.; // reset to zero
 
-            // Find neighbouring grid points outside IB 
-            for (int dk=dk0_c; dk<2; ++dk)
-                for (int dj=-1; dj<2; ++dj)
-                    for (int di=-1; di<2; ++di)
+            // Find neighbouring grid points outside IB (use rather wide search region)
+            for (int dk=dk0; dk<3; ++dk)
+                for (int dj=-2; dj<3; ++dj)
+                    for (int di=-2; di<3; ++di)
                     {
-                        const int ijk_test = (in_c+di) + (jn_f+dj)*icells + (kn_c+dk)*ijcells;
-                        bool ijk_in_fp = (std::find(ijk_fp_v.begin(), ijk_fp_v.end(), ijk_test) != ijk_fp_v.end());
-                        bool ijk_in_ib = (std::find(ijk_ib_v.begin(), ijk_ib_v.end(), ijk_test) != ijk_ib_v.end());
+                        const int ijk_test = (in+di) + (jnh+dj)*icells + (kn+dk)*ijcells; // combined grid index to test
+                        
+                        if (sdfv[ijk_test] < Delta || sdfv[ijk_test] > TF(4.)*Delta)
+                            continue;
 
-                        // Check if selected grid point is both outside IB and not a Forcing Point.
-                        if ( !ijk_in_fp && !ijk_in_ib )
-                        {
-                            const TF distance = absolute_distance(xi, yi, zi, x[in_c+di], yh[jn_f+dj], z[kn_c+dk]);
-                            Neighbour<TF> tmp_neighbour = {in_c+di, jn_f+dj, kn_c+dk, distance};
-                            v_neighbours.push_back(tmp_neighbour);
-                        }
+                        const TF distance = absolute_distance(xi, yi, zi, x[in+di], yh[jnh+dj], z[kn+dk]);
+                        Neighbour<TF> tmp_neighbour = {in+di, jnh+dj, kn+dk, distance};
+                        v_neighbours.push_back(tmp_neighbour);
+                        
                     }
 
             // Sort them on distance
             std::sort(v_neighbours.begin(), v_neighbours.end(), compare_value<TF>);
 
-            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest should be zero.
+            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest is set to zero weight.
             if (v_neighbours[0].distance < TF(1e-7))
             {
-                ipvi[nn*n_idw_loc]    = v_neighbours[0].i;
-                ipvj[nn*n_idw_loc]    = v_neighbours[0].j;
-                ipvk[nn*n_idw_loc]    = v_neighbours[0].k;
-                c_idw_v[nn*n_idw_loc] = TF(1.);  
+                ipvi[nn*n_idw_points]    = v_neighbours[0].i;
+                ipvj[nn*n_idw_points]    = v_neighbours[0].j;
+                ipvk[nn*n_idw_points]    = v_neighbours[0].k;
+                c_idw_v[nn*n_idw_points] = TF(1.);  
 
-                for (int ii=1; ii<n_idw_loc; ++ii)
+                for (int ii=1; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
-                    ipvi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                    ipvj[in]    = jn_f;
-                    ipvk[in]    = kn_c;
-                    c_idw_v[in] = TF(0.); // set weights here to ZERO
+                    const int in = ii + nn*n_idw_points; // index gives position in vectors
+
+                    ipvi[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                    ipvj[in]    = jnh;
+                    ipvk[in]    = kn;
+                    c_idw_v[in] = TF(0.);   // set weights here to ZERO
                 }
             }
             else
             {
-                if (v_neighbours.size() < n_idw_loc_min)
+                if (v_neighbours.size() < n_idw_points_min)
                 {
-                    std::cout << "ERROR: only found " << v_neighbours.size() << " s interpolation points around (less than minimum) ";
+                    std::cout << "ERROR: only found " << v_neighbours.size() << " v interpolation points around (less than minimum) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                     throw 1;
                 }
-                else if (v_neighbours.size() < n_idw_loc)
+                else if (v_neighbours.size() < n_idw_points)
                 {
-                    std::cout << "NOTE: only found " << v_neighbours.size() << " s interpolation points around (less than maximum allowed) ";
+                    std::cout << "NOTE: only found " << v_neighbours.size() << " v interpolation points around (less than maximum allowed) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                 }
-
-                // maximum distance in valid neighbours is available here.
-                dist_max = v_neighbours[v_neighbours.size()-1].distance;
                 
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; // index represent number of Forcing Points for this variable (gives position in vector)
+                    const int in = ii + nn*n_idw_points; // index represent number of Forcing Points for this variable (gives position in vector)
                     if (ii < v_neighbours.size())
                     {   
                         ipvi[in]    = v_neighbours[ii].i;
                         ipvj[in]    = v_neighbours[ii].j;
                         ipvk[in]    = v_neighbours[ii].k;
-                        c_idw_v[in] = std::pow((dist_max - v_neighbours[ii].distance) / (dist_max * v_neighbours[ii].distance), TF(0.5)) + TF(1e-9); 
+
+                        // SvdL, 20240902: using modified Shepard's Method for weights, with p=0.5 (appropriate value?)
+                        c_idw_v[in] = std::pow( std::max(TF(0.), (dist_max - v_neighbours[ii].distance)) / (dist_max * v_neighbours[ii].distance) , TF(0.5) );
                         c_idw_sum  += c_idw_v[in];
                     }
                     else
                     {
-                        ipvi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                        ipvj[in]    = jn_f;
-                        ipvk[in]    = kn_c;
-                        c_idw_v[in] = TF(0.); // set weights here to ZERO
+                        ipvi[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                        ipvj[in]    = jnh;
+                        ipvk[in]    = kn;
+                        c_idw_v[in] = TF(0.);   // set weights here to ZERO
                     }
                 }
-
+                
                 // normalize all weights
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
+                    const int in = ii + nn*n_idw_points; 
                     c_idw_v[in] /= c_idw_sum; 
                 }
             }
 
-            // 3. do for wloc
+            // 3. Do for wloc
 
-            dist_max  = 0.; // reset to zero
             c_idw_sum = 0.; // reset to zero
 
-            // Find neighbouring grid points outside IB 
-            for (int dk=dk0_f; dk<2; ++dk)
-                for (int dj=-1; dj<2; ++dj)
-                    for (int di=-1; di<2; ++di)
+            // Find neighbouring grid points outside IB (use rather wide search region)
+            for (int dk=dk0h; dk<3; ++dk)
+                for (int dj=-2; dj<3; ++dj)
+                    for (int di=-2; di<3; ++di)
                     {
-                        const int ijk_test = (in_c+di) + (jn_c+dj)*icells + (kn_f+dk)*ijcells;
-                        bool ijk_in_fp = (std::find(ijk_fp_w.begin(), ijk_fp_w.end(), ijk_test) != ijk_fp_w.end()); 
-                        bool ijk_in_ib = (std::find(ijk_ib_w.begin(), ijk_ib_w.end(), ijk_test) != ijk_ib_w.end());
+                        const int ijk_test = (in+di) + (jn+dj)*icells + (knh+dk)*ijcells; // combined grid index to test
+                        
+                        if (sdfw[ijk_test] < Deltah || sdfw[ijk_test] > TF(4.)*Deltah)
+                            continue;
 
-                        // Check if selected grid point is both outside IB and not a Forcing Point.
-                        if ( !ijk_in_fp && !ijk_in_ib )
-                        {
-                            const TF distance = absolute_distance(xi, yi, zi, x[in_c+di], y[jn_c+dj], zh[kn_f+dk]);
-                            Neighbour<TF> tmp_neighbour = {in_c+di, jn_c+dj, kn_f+dk, distance};
-                            w_neighbours.push_back(tmp_neighbour);
-                        }
+                        const TF distance = absolute_distance(xi, yi, zi, x[in+di], y[jn+dj], zh[knh+dk]);
+                        Neighbour<TF> tmp_neighbour = {in+di, jn+dj, knh+dk, distance};
+                        w_neighbours.push_back(tmp_neighbour);
+                        
                     }
 
             // Sort them on distance
             std::sort(w_neighbours.begin(), w_neighbours.end(), compare_value<TF>);
-            
-            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest should be zero.
+
+            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest is set to zero weight.
             if (w_neighbours[0].distance < TF(1e-7))
             {
-                ipwi[nn*n_idw_loc]    = w_neighbours[0].i;
-                ipwj[nn*n_idw_loc]    = w_neighbours[0].j;
-                ipwk[nn*n_idw_loc]    = w_neighbours[0].k;
-                c_idw_w[nn*n_idw_loc] = TF(1.);  
 
-                for (int ii=1; ii<n_idw_loc; ++ii)
+                ipwi[nn*n_idw_points]    = w_neighbours[0].i;
+                ipwj[nn*n_idw_points]    = w_neighbours[0].j;
+                ipwk[nn*n_idw_points]    = w_neighbours[0].k;
+                c_idw_w[nn*n_idw_points] = TF(1.);  
+
+                for (int ii=1; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc;
+                    const int in = ii + nn*n_idw_points; // index gives position in vectors
 
-                    ipwi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                    ipwj[in]    = jn_c;
-                    ipwk[in]    = kn_f;
-                    c_idw_w[in] = TF(0.); // set weights here to ZERO
+                    ipwi[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                    ipwj[in]    = jn;
+                    ipwk[in]    = knh;
+                    c_idw_w[in] = TF(0.);   // set weights here to ZERO
                 }
             }
             else
             {
-                if (w_neighbours.size() < n_idw_loc_min)
+                if (w_neighbours.size() < n_idw_points_min)
                 {
-                    std::cout << "ERROR: only found " << w_neighbours.size() << " s interpolation points around (less than minimum) ";
+                    std::cout << "ERROR: only found " << w_neighbours.size() << " w interpolation points around (less than minimum) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                     throw 1;
                 }
-                else if (w_neighbours.size() < n_idw_loc)
+                else if (w_neighbours.size() < n_idw_points)
                 {
-                    std::cout << "NOTE: only found " << w_neighbours.size() << " s interpolation points around (less than maximum allowed) ";
+                    std::cout << "NOTE: only found " << w_neighbours.size() << " w interpolation points around (less than maximum allowed) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                 }
-
-                // maximum distance in valid neighbours is available here.
-                dist_max = w_neighbours[w_neighbours.size()-1].distance;  
                 
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc;
+                    const int in = ii + nn*n_idw_points; // index represent number of Forcing Points for this variable (gives position in vector)
                     if (ii < w_neighbours.size())
                     {   
                         ipwi[in]    = w_neighbours[ii].i;
                         ipwj[in]    = w_neighbours[ii].j;
                         ipwk[in]    = w_neighbours[ii].k;
-                        c_idw_w[in] = std::pow((dist_max - w_neighbours[ii].distance) / (dist_max * w_neighbours[ii].distance), TF(0.5)) + TF(1e-9); 
+
+                        // SvdL, 20240902: using modified Shepard's Method for weights, with p=0.5 (appropriate value?)
+                        c_idw_w[in] = std::pow( std::max(TF(0.), (dist_maxh - w_neighbours[ii].distance)) / (dist_max * w_neighbours[ii].distance) , TF(0.5) );
                         c_idw_sum  += c_idw_w[in];
                     }
                     else
                     {
-                        ipwi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                        ipwj[in]    = jn_c;
-                        ipwk[in]    = kn_f;
-                        c_idw_w[in] = TF(0.); // set weights here to ZERO
+                        ipui[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                        ipuj[in]    = jn;
+                        ipuk[in]    = knh;
+                        c_idw_w[in] = TF(0.);   // set weights here to ZERO
                     }
                 }
-
+                
                 // normalize all weights
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
+                    const int in = ii + nn*n_idw_points; 
                     c_idw_w[in] /= c_idw_sum; 
                 }
             }
 
-            // 4. do for sloc
+            // 4. Do for sloc
 
-            dist_max  = 0.; // reset to zero
             c_idw_sum = 0.; // reset to zero
 
-            // Find neighbouring grid points outside IB 
-            for (int dk=dk0_c; dk<2; ++dk)
-                for (int dj=-1; dj<2; ++dj)
-                    for (int di=-1; di<2; ++di)
+            // Find neighbouring grid points outside IB (use rather wide search region)
+            for (int dk=dk0; dk<3; ++dk)
+                for (int dj=-2; dj<3; ++dj)
+                    for (int di=-2; di<3; ++di)
                     {
-                        const int ijk_test = (in_c+di) + (jn_c+dj)*icells + (kn_c+dk)*ijcells;
-                        bool ijk_in_fp = (std::find(ijk_fp_s.begin(), ijk_fp_s.end(), ijk_test) != ijk_fp_s.end()); 
-                        bool ijk_in_ib = (std::find(ijk_ib_s.begin(), ijk_ib_s.end(), ijk_test) != ijk_ib_s.end());
+                        const int ijk_test = (in+di) + (jn+dj)*icells + (kn+dk)*ijcells; // combined grid index to test
+                        
+                        if (sdfs[ijk_test] < Delta || sdfs[ijk_test] > TF(4.)*Delta)
+                            continue;
 
-                        // Check if selected grid point is both outside IB and not a Forcing Point.
-                        if ( !ijk_in_fp && !ijk_in_ib ) 
-                        {
-                            const TF distance = absolute_distance(xi, yi, zi, x[in_c+di], y[jn_c+dj], z[kn_c+dk]);
-                            Neighbour<TF> tmp_neighbour = {in_c+di, jn_c+dj, kn_c+dk, distance};
-                            s_neighbours.push_back(tmp_neighbour);
-                        }
+                        const TF distance = absolute_distance(xi, yi, zi, x[in+di], y[jn+dj], z[kn+dk]);
+                        Neighbour<TF> tmp_neighbour = {in+di, jn+dj, kn+dk, distance};
+                        s_neighbours.push_back(tmp_neighbour);
+                        
                     }
 
             // Sort them on distance
             std::sort(s_neighbours.begin(), s_neighbours.end(), compare_value<TF>);
-            
-            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest should be zero.
+
+            // If smallest distance is zero (to within some precision), this point gets weight 1 and the rest is set to zero weight.
             if (s_neighbours[0].distance < TF(1e-7))
             {
-                ipsi[nn*n_idw_loc]    = s_neighbours[0].i;
-                ipsj[nn*n_idw_loc]    = s_neighbours[0].j;
-                ipsk[nn*n_idw_loc]    = s_neighbours[0].k;
-                c_idw_s[nn*n_idw_loc] = TF(1.);  
 
-                for (int ii=1; ii<n_idw_loc; ++ii)
+                ipsi[nn*n_idw_points]    = s_neighbours[0].i;
+                ipsj[nn*n_idw_points]    = s_neighbours[0].j;
+                ipsk[nn*n_idw_points]    = s_neighbours[0].k;
+                c_idw_s[nn*n_idw_points] = TF(1.);  
+
+                for (int ii=1; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
+                    const int in = ii + nn*n_idw_points; // index gives position in vectors
 
-                    ipsi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                    ipsj[in]    = jn_c;
-                    ipsk[in]    = kn_c;
-                    c_idw_s[in] = TF(0.); // set weights here to ZERO
+                    ipsi[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                    ipsj[in]    = jn;
+                    ipsk[in]    = kn;
+                    c_idw_s[in] = TF(0.);   // set weights here to ZERO
                 }
             }
             else
             {
-                if (s_neighbours.size() < n_idw_loc_min) 
+                if (s_neighbours.size() < n_idw_points_min)
                 {
                     std::cout << "ERROR: only found " << s_neighbours.size() << " s interpolation points around (less than minimum) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                     throw 1;
                 }
-                else if (s_neighbours.size() < n_idw_loc)
+                else if (s_neighbours.size() < n_idw_points)
                 {
                     std::cout << "NOTE: only found " << s_neighbours.size() << " s interpolation points around (less than maximum allowed) ";
                     std::cout << "xi=" << xi << ", yi=" << yi << ", zi=" << zi << std::endl; 
                 }
-
-                // maximum distance in valid neighbours is available here.
-                dist_max = s_neighbours[s_neighbours.size()-1].distance;  
                 
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
-                    if (ii <s_neighbours.size())
+                    const int in = ii + nn*n_idw_points; // index represent number of Forcing Points for this variable (gives position in vector)
+                    if (ii < s_neighbours.size())
                     {   
                         ipsi[in]    = s_neighbours[ii].i;
                         ipsj[in]    = s_neighbours[ii].j;
                         ipsk[in]    = s_neighbours[ii].k;
-                        c_idw_s[in] = std::pow((dist_max - s_neighbours[ii].distance) / (dist_max * s_neighbours[ii].distance), TF(0.5)) + TF(1e-9); 
+
+                        // SvdL, 20240902: using modified Shepard's Method for weights, with p=0.5 (appropriate value?)
+                        c_idw_s[in] = std::pow( std::max(TF(0.), (dist_max - s_neighbours[ii].distance)) / (dist_max * s_neighbours[ii].distance) , TF(0.5) );
                         c_idw_sum  += c_idw_s[in];
                     }
                     else
                     {
-                        ipsi[in]    = in_c;   // just a "FillValue", make sure it carries weight ZERO
-                        ipsj[in]    = jn_c;
-                        ipsk[in]    = kn_c;
-                        c_idw_s[in] = TF(0.); // set weights here to ZERO
+                        ipsi[in]    = in;       // just a "FillValue", make sure it carries weight ZERO
+                        ipsj[in]    = jn;
+                        ipsk[in]    = kn;
+                        c_idw_s[in] = TF(0.);   // set weights here to ZERO
                     }
                 }
-
+                
                 // normalize all weights
-                for (int ii=0; ii<n_idw_loc; ++ii)
+                for (int ii=0; ii<n_idw_points; ++ii)
                 {
-                    const int in = ii + nn*n_idw_loc; 
+                    const int in = ii + nn*n_idw_points; 
                     c_idw_s[in] /= c_idw_sum; 
                 }
             }
-        }
-    }   
 
-    template <typename TF>
-    void calculate_rotation_matrix(
-        TF* const restrict rot,
-        const TF* const restrict norm, 
-        const int n_fpoints)
+        }
+
+    }
+
+    template<typename TF>
+    void process_sdf(
+        Forcing_points<TF>& fpoints, IB_points<TF>& ibpoints, 
+        TF* const restrict sdf,
+        const std::vector<TF>& x, const std::vector<TF>& y, const std::vector<TF>& z,
+        const TF dx, const TF dy, 
+        const std::vector<TF>& dz, const std::vector<TF>& dzi,
+        const int istart, const int jstart, const int kstart,
+        const int iend,   const int jend,   const int kend,
+        const int icells, const int jcells, const int ijcells,
+        const int n_idw_points)
     {
-        const int rdim = 9;
+        const int ii = 1;
+        const int jj = icells;
+        const int kk = ijcells;
+        const TF dxi = TF(1.)/dx;
+        const TF dyi = TF(1.)/dy;
 
-         // Loop over all points to be forced
-        for (int n = 0; n < n_fpoints; ++n)
-        {
+        TF dsdx;
+        TF dsdy;
+        TF dsdz;
+        TF norm;
+        TF faci;
 
-            // seperate out the x,y,z components of the normal vector.
-            const TF normx = norm[3*n];
-            const TF normy = norm[3*n+1];
-            const TF normz = norm[3*n+2];
+        for (int k=kstart; k<kend; ++k)
+            for (int j=jstart; j<jend; ++j)
+                for (int i=istart; i<iend; ++i)
+                    {
+                        const int ijk = i + j*jj + k*kk;
+                        const TF Delta = std::pow(dx*dy*dz[k], TF(1./3.)); // Only points in shell distance=Delta are to be forced
 
-            // SvdL, 29-06-2023: still add description of how this matrix is set up.
-            // writing the whole system out likely makes rotation matrix redundant at all, as operations can easily be done inside the functions.
-            // also check for further degenerate cases, matrix below could maybe go wrong with precision or float to double conversions.
+                        if ( sdf[ijk] < TF(0.))
+                        {
+                            ibpoints.i.push_back(i);
+                            ibpoints.j.push_back(j);
+                            ibpoints.k.push_back(k);
+                            ibpoints.ijk.push_back(ijk);
+                        } 
+                        else if ( TF(0.) <= sdf[ijk] < Delta) // SvdL, 20240828: for now, points on boundary must count as forcing point... points at Delta are "free". 
+                        // this may create a problem: 2 forcing points per wall location may be found (if one is on the wall, another one above may be identified)... THINK about this later.
+                        {
+                            fpoints.i.push_back(i);
+                            fpoints.j.push_back(j);
+                            fpoints.k.push_back(k);
+                            fpoints.ijk.push_back(ijk);
+                            fpoints.dist_b.push_back(sdf[ijk]);
+
+                            // Obtain local gradient to find interpolation point and surface point (also equals local normal vector; should point away from surface)
+                            dsdx = ( interp2(sdf[ijk], sdf[ijk+ii      ]) - interp2(sdf[ijk-ii      ], sdf[ijk]) ) * dxi;
+                            dsdy = ( interp2(sdf[ijk], sdf[ijk   +jj   ]) - interp2(sdf[ijk   -jj   ], sdf[ijk]) ) * dyi; 
+                            dsdz = ( interp2(sdf[ijk], sdf[ijk      +kk]) - interp2(sdf[ijk      -kk], sdf[ijk]) ) * dzi[k]; 
+
+                            norm = std::sqrt( fm::pow2(dsdx) + fm::pow2(dsdy) + fm::pow2(dsdz) );
+
+                            dsdx /= norm;
+                            dsdy /= norm;
+                            dsdz /= norm;
+
+                            // Calculate and store interpolation point (xi,..) and surface point (xb,..)
+                            faci = ( sdf[ijk] < TF(0.5)*Delta ) ? (1.25*Delta/sdf[ijk]) : (1.75*Delta/sdf[ijk]) ; //<< This should extend the interpolation point to well within fluid zone (thus surrounded by free fluid points)
+
+                            fpoints.xi.push_back(x[i] + faci*sdf[ijk]*dsdx);
+                            fpoints.yi.push_back(y[j] + faci*sdf[ijk]*dsdy);
+                            fpoints.zi.push_back(z[k] + faci*sdf[ijk]*dsdz);
+                            fpoints.xb.push_back(x[i] - sdf[ijk]*dsdx);
+                            fpoints.yb.push_back(y[j] - sdf[ijk]*dsdy);
+                            fpoints.zb.push_back(z[k] - sdf[ijk]*dsdz);
+                            fpoints.dist_i.push_back((faci+TF(1.))*sdf[ijk]);         //<< i.c.w. calculation of faci, this is ugly but clear
+
+                            // Calculate and store elememts of rotation matrix (as normal vector is now readily available)
+                            // ... this whole part may seem sloppy: always possibility to change and calculate inside function where points are forced
+                            if (dsdx == TF(1.) && dsdy == TF(0.) && dsdz == TF(0.))
+                            {
+                                fpoints.rot.push_back(TF(0.));                              
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(-1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(0.));
+                            }
+                            else if (dsdx == TF(-1.) && dsdy == TF(0.) && dsdz == TF(0.))
+                            {
+                                fpoints.rot.push_back(TF(0.));                              
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(-1.));
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(TF(0.));
+                            }
+                            else
+                            {
+                                const TF scale = std::sqrt( fm::pow2(dsdy) + fm::pow2(dsdz)); 
+
+                                fpoints.rot.push_back((fm::pow2(dsdy) + fm::pow2(dsdz)) / scale);                              
+                                fpoints.rot.push_back(-dsdx*dsdy/scale);
+                                fpoints.rot.push_back(-dsdx*dsdz/scale);
+                                fpoints.rot.push_back(TF(0.));
+                                fpoints.rot.push_back(dsdz/scale);
+                                fpoints.rot.push_back(-dsdy/scale);
+                                fpoints.rot.push_back(dsdx);
+                                fpoints.rot.push_back(dsdy);
+                                fpoints.rot.push_back(dsdz);
+                            }
+
+                        }
+                    }
+
+        const int nfpoints = fpoints.i.size();
+        fpoints.n_fpoints = nfpoints;
     
-            if (normx == TF(1.) && normy == TF(0.) && normz == TF(0.))
-            {
-                rot[rdim * n]     = TF(0.);                              
-                rot[rdim * n + 1] = TF(0.);
-                rot[rdim * n + 2] = TF(-1.);
-                rot[rdim * n + 3] = TF(0.);
-                rot[rdim * n + 4] = TF(1.);
-                rot[rdim * n + 5] = TF(0.);
-                rot[rdim * n + 6] = TF(1.);
-                rot[rdim * n + 7] = TF(0.);
-                rot[rdim * n + 8] = TF(0.);
-            }
-            else if (normx == TF(-1.) && normy == TF(0.) && normz == TF(0.))
-            {
-                rot[rdim * n]     = TF(0.);                              
-                rot[rdim * n + 1] = TF(0.);
-                rot[rdim * n + 2] = TF(1.);
-                rot[rdim * n + 3] = TF(0.);
-                rot[rdim * n + 4] = TF(1.);
-                rot[rdim * n + 5] = TF(0.);
-                rot[rdim * n + 6] = TF(-1.);
-                rot[rdim * n + 7] = TF(0.);
-                rot[rdim * n + 8] = TF(0.);
-            }
-            else
-            {
-                const TF scale = std::sqrt( fm::pow2(normy) + fm::pow2(normz)); 
+        const int nibpoints = ibpoints.i.size();
+        ibpoints.n_ibpoints = nibpoints;   
 
-                rot[rdim * n]     = (fm::pow2(normy) + fm::pow2(normz)) / scale;                              
-                rot[rdim * n + 1] = -normx*normy/scale;
-                rot[rdim * n + 2] = -normx*normz/scale;
-                rot[rdim * n + 3] = TF(0.);
-                rot[rdim * n + 4] = normz/scale;
-                rot[rdim * n + 5] = -normy/scale;
-                rot[rdim * n + 6] = normx;
-                rot[rdim * n + 7] = normy;
-                rot[rdim * n + 8] = normz;
-            }
-        }
+        // Finally, preset containers for SvdL,interpolation points and weights
+        // SvdL, 20240902: if we already fill here with "semi"-sensical values, we could potentially reduce unneccesary lines of code in the setup_interpolation function
+        fpoints.ip_u_i.resize(nfpoints*n_idw_points);
+        fpoints.ip_u_j.resize(nfpoints*n_idw_points);
+        fpoints.ip_u_k.resize(nfpoints*n_idw_points);
+        fpoints.ip_v_i.resize(nfpoints*n_idw_points);
+        fpoints.ip_v_j.resize(nfpoints*n_idw_points);
+        fpoints.ip_v_k.resize(nfpoints*n_idw_points);
+        fpoints.ip_w_i.resize(nfpoints*n_idw_points);
+        fpoints.ip_w_j.resize(nfpoints*n_idw_points);
+        fpoints.ip_w_k.resize(nfpoints*n_idw_points);
+        fpoints.c_idw_u.resize(nfpoints*n_idw_points);
+        fpoints.c_idw_v.resize(nfpoints*n_idw_points);
+        fpoints.c_idw_w.resize(nfpoints*n_idw_points);
+        fpoints.c_idw_s.resize(nfpoints*n_idw_points);
 
     }
 
@@ -618,7 +657,7 @@ namespace
         const int* const restrict ipui, const int* const restrict ipuj, const int* const restrict ipuk, const TF* const restrict c_idw_u,
         const int* const restrict ipvi, const int* const restrict ipvj, const int* const restrict ipvk, const TF* const restrict c_idw_v, 
         const int* const restrict ipwi, const int* const restrict ipwj, const int* const restrict ipwk, const TF* const restrict c_idw_w,
-        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 08-06-2023: not used for now..
+        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 20240901: not used for now..
         const TF* const restrict db, const TF* const restrict di, const TF* const restrict z0b,
         Boundary_type bc, const TF visc, const int n_fpoints, const int n_idw_loc,
         const int icells, const int ijcells,
@@ -626,7 +665,7 @@ namespace
     {
 
         const int rdim = 9;                                        
-        const TF  dtf  = static_cast<TF>(dt);// SvdL, 15-06-2023: just an intermediate solution/test for now. see how to fix better later.
+        const TF  dtf  = static_cast<TF>(dt); // SvdL, 20240901: seems like ugly solution, see how to improve later.
 
         TF u_ip_la;
         TF v_ip_la;
@@ -656,13 +695,13 @@ namespace
             // 1. interpolate surroundings neighbours to interpolation point
             for (int i = 0; i < n_idw_loc; ++i)
             {
-                const int ii = i + n * n_idw_loc;                                   // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
+                const int ii = i + n * n_idw_loc;
+                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells;
+                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells;
+                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells;
                 
                 // Do the correction based on the auxiliary velocity (i.e. intermediate velocity at next timestep without pressure forcing).
-                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku]);
+                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku] );
                 v_ip += c_idw_v[ii] * (fld_v[ijkv] + dtf * tend_v[ijkv] );
                 w_ip += c_idw_w[ii] * (fld_w[ijkw] + dtf * tend_w[ijkw] );
             }
@@ -678,15 +717,15 @@ namespace
             if (db[n] > z0b[n])
             {
                 // 3. calculate (locally-aligned) velocity at forcing point
-                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                w_fp_la = w_ip_la * fm::pow2(db[n] / (db[n] + di[n]));
+                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                w_fp_la = w_ip_la * fm::pow2(db[n] / di[n]);
 
                 // 4. rotate back to standard grid alginment (only one component is needed here), 
                 // AND overwrite old tendency at forcing point with new one to achieve this.
                 tend_u[ijkf] = ( (r11 * u_fp_la + r21 * v_fp_la + r31 * w_ip_la) - fld_u[ijkf] ) / dtf;
             }
-            else // SvdL, 29-06-2023: change later into Van Driest like correction..
+            else // SvdL, 20240901: investigate if can be changed into Van Driest like correction.. would require iterative approach?
             {
                 tend_u[ijkf] = ( TF(0.) - fld_u[ijkf] ) / dtf;
             }
@@ -708,7 +747,7 @@ namespace
         const int* const restrict ipui, const int* const restrict ipuj, const int* const restrict ipuk, const TF* const restrict c_idw_u,
         const int* const restrict ipvi, const int* const restrict ipvj, const int* const restrict ipvk, const TF* const restrict c_idw_v, 
         const int* const restrict ipwi, const int* const restrict ipwj, const int* const restrict ipwk, const TF* const restrict c_idw_w,
-        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 08-06-2023: not used for now..
+        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 20240901: not used for now..
         const TF* const restrict db, const TF* const restrict di, const TF* const restrict z0b,
         Boundary_type bc, const TF visc, const int n_fpoints, const int n_idw_loc,
         const int icells, const int ijcells,
@@ -716,7 +755,7 @@ namespace
     {
 
         const int rdim = 9;                                       
-        const TF  dtf  = static_cast<TF>(dt); // SvdL, 15-06-2023: just an intermediate solution/test for now. see how to fix better later.
+        const TF  dtf  = static_cast<TF>(dt); // SvdL, 20240901: seems like ugly solution, see how to improve later.
 
         TF u_ip_la;
         TF v_ip_la;
@@ -746,13 +785,13 @@ namespace
             // 1. interpolate surroundings neighbours to interpolation point
             for (int i = 0; i < n_idw_loc; ++i)
             {
-                const int ii = i + n * n_idw_loc;                                   // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
+                const int ii = i + n * n_idw_loc;                                  
+                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells;
+                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells;
+                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells;
 
                 // Do the correction based on the auxiliary velocity (i.e. intermediate velocity at next timestep without pressure forcing).
-                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku]);
+                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku] );
                 v_ip += c_idw_v[ii] * (fld_v[ijkv] + dtf * tend_v[ijkv] );
                 w_ip += c_idw_w[ii] * (fld_w[ijkw] + dtf * tend_w[ijkw] );
             }
@@ -768,9 +807,9 @@ namespace
             if (db[n] > z0b[n])
             {
                 // 3. calculate (locally-aligned) velocity at forcing point
-                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                w_fp_la = w_ip_la * fm::pow2(db[n] / (db[n] + di[n]));
+                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                w_fp_la = w_ip_la *  fm::pow2(db[n] / di[n]);
 
                 // 4. rotate back to standard grid alginment (only one component is needed here), 
                 // AND overwrite old tendency at forcing point with new one to achieve this.
@@ -797,7 +836,7 @@ namespace
         const int* const restrict ipui, const int* const restrict ipuj, const int* const restrict ipuk, const TF* const restrict c_idw_u,
         const int* const restrict ipvi, const int* const restrict ipvj, const int* const restrict ipvk, const TF* const restrict c_idw_v, 
         const int* const restrict ipwi, const int* const restrict ipwj, const int* const restrict ipwk, const TF* const restrict c_idw_w,
-        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 08-06-2023: not used for now..
+        const int* const restrict ipsi, const int* const restrict ipsj, const int* const restrict ipsk, const TF* const restrict c_idw_s, // SvdL, 20240901: not used for now..
         const TF* const restrict db, const TF* const restrict di, const TF* const restrict z0b,
         Boundary_type bc, const TF visc, const int n_fpoints, const int n_idw_loc,
         const int icells, const int ijcells,
@@ -805,7 +844,7 @@ namespace
     {
 
         const int rdim = 9;                                        
-        const TF  dtf  = static_cast<TF>(dt); // SvdL, 15-06-2023: just an intermediate solution/test for now. see how to fix better later.
+        const TF  dtf  = static_cast<TF>(dt); // SvdL, 20240901: seems like ugly solution, see how to improve later.
 
         TF u_ip_la;
         TF v_ip_la;
@@ -835,13 +874,13 @@ namespace
             // 1. interpolate surroundings neighbours to interpolation point
             for (int i = 0; i < n_idw_loc; ++i)
             {
-                const int ii = i + n * n_idw_loc;                                   // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
+                const int ii = i + n * n_idw_loc;                                  
+                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells;
+                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells;
+                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells;
 
                 // Do the correction based on the auxiliary velocity (i.e. intermediate velocity at next timestep without pressure forcing).
-                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku]);
+                u_ip += c_idw_u[ii] * (fld_u[ijku] + dtf * tend_u[ijku] );
                 v_ip += c_idw_v[ii] * (fld_v[ijkv] + dtf * tend_v[ijkv] );
                 w_ip += c_idw_w[ii] * (fld_w[ijkw] + dtf * tend_w[ijkw] );
             }
@@ -857,9 +896,9 @@ namespace
             if (db[n] > z0b[n])
             {
                 // 3. calculate (locally-aligned) velocity at forcing point
-                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]);
-                w_fp_la = w_ip_la * fm::pow2(db[n] / (db[n] + di[n]));
+                u_fp_la = u_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                v_fp_la = v_ip_la * std::log(db[n] / z0b[n]) / std::log(di[n] / z0b[n]);
+                w_fp_la = w_ip_la * fm::pow2(db[n] / di[n]);
 
                 // 4. rotate back to standard grid alginment (only one component is needed here), 
                 // AND overwrite old tendency at forcing point with new one to achieve this.
@@ -872,7 +911,7 @@ namespace
         }
     }
 
-    // SvdL, 12-06-2023: locations and or weights of momentum interpolation points are not used (for now), but still passed for consistency with other functions.
+    // SvdL, 20240901: locations and/or weights of momentum interpolation points are not used (for now), but still passed for consistency with other functions.
     template <typename TF>
     void set_forcing_points_c(
         TF* const restrict tend_c,
@@ -892,7 +931,7 @@ namespace
         const int icells, const int ijcells, 
         const double dt)
     {
-        const TF  dtf  = static_cast<TF>(dt); // SvdL, 15-06-2023: just an intermediate solution/test for now. see how to fix better later.
+        const TF  dtf  = static_cast<TF>(dt); // SvdL, 20240901: seems like ugly solution, see how to improve later.
 
         // For Dirichlet BCs
         if (bc == Boundary_type::Dirichlet_type)
@@ -907,8 +946,8 @@ namespace
                 // 1. interpolate surroundings neighbours to interpolation point
                 for (int i = 0; i < n_idw_loc; ++i)
                 {
-                    const int ii = i + n * n_idw_loc;                                   // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                    const int ijki = ipsi[ii] + ipsj[ii] * icells + ipsk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
+                    const int ii = i + n * n_idw_loc;                                  
+                    const int ijki = ipsi[ii] + ipsj[ii] * icells + ipsk[ii] * ijcells;
                     c_ip += c_idw_s[ii] * (fld_c[ijki] + dtf * tend_c[ijki] );
                 }
 
@@ -916,7 +955,7 @@ namespace
                 // for now, (1) neglect stability effects (requires "fine enough" grid), and (2) assume both points are in logarithmic layer
                 if (db[n] > z0b[n])
                 {
-                    tend_c[ijkf] = ( ( (c_ip - boundary_value[n]) * std::log(db[n] / z0b[n]) / std::log((db[n] + di[n]) / z0b[n]) + boundary_value[n] ) - fld_c[ijkf] ) / dtf;
+                    tend_c[ijkf] = ( ( (c_ip - boundary_value[n]) * std::log(db[n] / z0b[n]) / std::log( di[n] / z0b[n]) + boundary_value[n] ) - fld_c[ijkf] ) / dtf;
                 }
                 else
                 {
@@ -926,23 +965,23 @@ namespace
         }
         else if (bc == Boundary_type::Flux_type)
         {
-            return; // SvdL, 29-06-2023: still implement later
+            return; // SvdL, 20240918: still implement later
         }
         else if (bc == Boundary_type::Neumann_type)
         {
-            return; // SvdL, 29-06-2023: still implement later
+            return; // SvdL, 20240918: still implement later
         }
 
     }
 
-    // SvdL, 12-06-2023: locations and or weights of momentum interpolation points are not used (for now), but still passed for consistency with other functions.
+    // SvdL, 20240901: locations and/or weights of momentum interpolation points are not used (for now), but still passed for consistency with other functions.
     template <typename TF>
     void set_forcing_points_evisc(
         TF* const restrict fld_evisc,
         const TF* const restrict fld_u,
         const TF* const restrict fld_v,
         const TF* const restrict fld_w,
-        // const TF* const restrict boundary_value, //<< SvdL, 19-06-2023: for now not needed for eddy viscosity 
+        // const TF* const restrict boundary_value, //<< SvdL, 20240909: for now not needed for eddy viscosity 
         const int* const restrict gi, const int* const restrict gj, const int* const restrict gk,
         const TF* const restrict rot,
         const int* const restrict ipui, const int* const restrict ipuj, const int* const restrict ipuk, const TF* const restrict c_idw_u,
@@ -954,21 +993,21 @@ namespace
         const int icells, const int ijcells)
     {
 
-        // SvdL, 21-05-2023: IMPLEMENTATION NOTES
+        // SvdL, 20240901: IMPLEMENTATION NOTES
         // At immersed boundary, eddy diffusivity is "theoretically" purely driven by the wall-closure model, as we use this same model to set momentum and scalars.
         // Therefore, set K-values accordingly. This implementation requires interpolated momentum at cell center.
         // DO NOT use blending with/extrapolation from LES K-values at second layer (as opposed to Roman et al. [2009] or DeLeon et al. [2018])
         // Blending/extrapolation would make K-value inconsistent with forced momentum/scalars. "Blending" occurs at the cell face in subsequent integration step.
         // This does create a sort-of unsmooth transition on the cell face above.
 
-        // Future: extent with Van Driest (1956) correction and/or make suitable for DNS.
+        // Future: extent with Van Driest (1956) correction and/or make suitable for DNS (see review Verzicco for overview of possibilities, introduces iterative system)
         // DO NOT add molecular viscosity: this is done in the normal diffusion functions.
 
-        // SvdL, 23-05-2023: there is another peculiarity here >> that still needs to be fixed properly <<
+        // SvdL, 20240918: there is another peculiarity here >> that still needs to be fixed properly <<
         // In case when the grid center coincides with the wall, u,v-momentum is (likely) forced directly to zero value.
         // This is however not allowed for the eddy viscosity, as this would result in zero flux over the boundary, which is needed
         // because the next cell is a "free" grid cell and will need a set K-value for the flux calculation.
-        // The correct MOST-consistent value under this conditions can be found from equation... (STILL DO AND IMPLEMENT)
+        // The correct MOST-consistent value under this conditions can maybe be found from equation... (STILL DO AND IMPLEMENT)
 
         const int rdim = 9;
 
@@ -999,10 +1038,10 @@ namespace
             // 1. interpolate surroundings neighbours to interpolation point
             for (int i = 0; i < n_idw_loc; ++i)
             {
-                const int ii = i + n * n_idw_loc;                                   // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
-                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells; // SvdL, 20-05-2023: CHECK LOCATIONS!! NOTE
+                const int ii = i + n * n_idw_loc;                                  
+                const int ijku = ipui[ii] + ipuj[ii] * icells + ipuk[ii] * ijcells;
+                const int ijkv = ipvi[ii] + ipvj[ii] * icells + ipvk[ii] * ijcells;
+                const int ijkw = ipwi[ii] + ipwj[ii] * icells + ipwk[ii] * ijcells;
 
                 u_ip += c_idw_u[ii] * fld_u[ijku];
                 v_ip += c_idw_v[ii] * fld_v[ijkv];
@@ -1021,12 +1060,12 @@ namespace
                 // for now, (1) neglect flow rotation over height, (2) neglect stability effects (requires "fine enough" grid),
                 // (3) assume both points are in logarithmic layer, and (4) assume zero-valued Dirichlet conditions for momentum (i.e. no-slip condition)
                 // future options: investigate use of Van Driest (1956) correction and/or DNS mode.
-                fld_evisc[ijkf] = fm::pow2(Constants::kappa<TF>) * umag_ip_la * db[n] / std::log((db[n] + di[n]) / z0b[n]);
+                fld_evisc[ijkf] = fm::pow2(Constants::kappa<TF>) * umag_ip_la * db[n] / std::log(di[n] / z0b[n]);
             }
             else
             {
-                // SvdL, 24-05-2023: Currently defaulting to WRONG evisc-value due to zero boundary distance..
-                fld_evisc[ijkf] = fm::pow2(Constants::kappa<TF>) * umag_ip_la * z0b[n] / std::log((db[n] + di[n]) / z0b[n]);
+                // SvdL, 20240901: Currently defaulting to WRONG(?) evisc-value due to zero boundary distance..
+                fld_evisc[ijkf] = fm::pow2(Constants::kappa<TF>) * umag_ip_la * z0b[n] / std::log(di[n] / z0b[n]);
             }
         }
     }
@@ -1040,7 +1079,7 @@ namespace
         const int n_ib,
         const double dt)
     {
-        const TF  dtf  = static_cast<TF>(dt);// SvdL, 15-06-2023: just an intermediate solution/test for now. see how to fix better later.
+        const TF  dtf  = static_cast<TF>(dt); // SvdL, 20240901: seems like ugly solution, see how to improve later.
 
         for (int nn=0; nn<n_ib; ++nn)
         {
@@ -1072,38 +1111,39 @@ Immersed_boundary<TF>::Immersed_boundary(Master &masterin, Grid<TF> &gridin, Fie
 
     if (sw_ib_str == "0")
         sw_ib = IB_type::Disabled;
-    // else if (sw_ib_str == "obj") // SvdL, 21-05-2023: potentially implement others options later, e.g., OBJ/STL/SDF 
-    //     sw_ib = IB_type::OBJ;    // (practically the same as by user defined input but now all processing should be moved from python to microhh)
-    else if (sw_ib_str == "user")   // SvdL, in User defined input: specificy e.g. via netcdf the fpoints-data directly (from preprocess in python)
-        sw_ib = IB_type::User;
+    else if (sw_ib_str == "sdf")
+        sw_ib = IB_type::SDF;
     else
     {
         std::string error = "\"" + sw_ib_str + "\" is an illegal value for \"sw_ib\"";
         throw std::runtime_error(error);
     }
 
-    // SvdL, 20-05-2023: put check on second order grids and use of smagorinsky diffusion
-    // SvdL, working smagorinsky should easily be extendable to DNS in 2nd order...
-    if (grid.get_spatial_order() != Grid_order::Second)
-        throw std::runtime_error("Current immersed boundaries only run with second order grids.");
-
-    // if (diff.get_switch() != Diffusion_type::Diff_smag2)
-    //     throw std::runtime_error("Current immersed boundaries only run with smagorinsky diffusion.");
-
     if (sw_ib != IB_type::Disabled)
     {
+        // Check for use of second order grid and smagorinsky diffusion
+        if (grid.get_spatial_order() != Grid_order::Second)
+            throw std::runtime_error("Current immersed boundaries only run with second order grids.");
+
+        // if (diff.get_switch() != Diffusion_type::Diff_smag2)
+        //     throw std::runtime_error("Current immersed boundaries only run with smagorinsky diffusion.");
+        
         // Set a minimum of 3 ghost cells in the horizontal
-        const int ijgc = 3;                          // SvdL, 01-06-2023: increased this to three to cover for possibility that fpoint is on MPI boundary, 
+        const int ijgc = 3;                          // SvdL, 20240828: increased to 3 for increased "options" for projection points
         grid.set_minimum_ghost_cells(ijgc, ijgc, 0); // then interpolation point will be on first layer of ghost cells, and two layers remain for the interpolation
 
         // Read additional settings
-        n_idw_points     = inputin.get_item<int>("IB", "n_idw_points", "", 8);     // SvdL, 21-05-2023: default of 8 seems reasonable.. saw this in paper Lundquist et al.
-        n_idw_points_min = inputin.get_item<int>("IB", "n_idw_points_min", "", 4); // SvdL, 06-06-2023: minimum amount of n_idw_points needed for interpolation (NOTE, still check amount)
+        n_idw_points     = inputin.get_item<int>("IB", "n_idw_points", "", 8);     // SvdL, 20240909: default of 8 seems reasonable..
+        n_idw_points_min = inputin.get_item<int>("IB", "n_idw_points_min", "", 4); // SvdL, 20240918: minimum amount of n_idw_points needed for interpolation (4 also reasonable?)
 
         // Set available masks
         available_masks.insert(available_masks.end(), {"ib"});
 
-        // SvdL, 24-07-2024: no check if same scalars are defined in [fields].. they should be AND the order should match
+        // Read additional parameters from input
+        z0bound    = inputin.get_item<TF>("IB", "z0b", "");
+
+        // SvdL, 20240911: should still work...
+        // SvdL, 20240724: no check if same scalars are defined in [fields].. they should be AND the order should match
         // If scalars are present (excl. temperature), read in corresponding boundary type
         if (fields.sp.size() > 0)
         {
@@ -1113,6 +1153,7 @@ Immersed_boundary<TF>::Immersed_boundary(Master &masterin, Grid<TF> &gridin, Fie
                 throw std::runtime_error("Number of given boundary types does not equal number of scalars.");
         }
     }
+
 }
 
 template <typename TF>
@@ -1134,29 +1175,29 @@ void Immersed_boundary<TF>::exec_viscosity()
         fields.mp.at("u")->fld.data(),
         fields.mp.at("v")->fld.data(),
         fields.mp.at("w")->fld.data(),
-        // fpoints.at("s").sbot.at("s").data(),                                                         //<< SvdL, 19-06-2023: for now not needed here,  // value of boundary conditions to be enforced
-        fpoints.at("s").i.data(), fpoints.at("s").j.data(), fpoints.at("s").k.data(),                   // points to be forced
-        fpoints.at("s").rot.data(),                                                                     // rotational matrix for local surface alignment
+        // fpoints.at("s").sbot.at("s").data(),                                                                                      //<< SvdL, 19-06-2023: for now not needed here,  // value of boundary conditions to be enforced
+        fpoints.at("s").i.data(), fpoints.at("s").j.data(), fpoints.at("s").k.data(),                                                // points to be forced
+        fpoints.at("s").rot.data(),                                                                                                  // rotational matrix for local surface alignment
         fpoints.at("s").ip_u_i.data(), fpoints.at("s").ip_u_j.data(), fpoints.at("s").ip_u_k.data(), fpoints.at("s").c_idw_u.data(), // locations of the neighbouring u-points + weights
         fpoints.at("s").ip_v_i.data(), fpoints.at("s").ip_v_j.data(), fpoints.at("s").ip_v_k.data(), fpoints.at("s").c_idw_v.data(), // locations of the neighbouring v-points + weights
         fpoints.at("s").ip_w_i.data(), fpoints.at("s").ip_w_j.data(), fpoints.at("s").ip_w_k.data(), fpoints.at("s").c_idw_w.data(), // locations of the neighbouring w-points + weights
         fpoints.at("s").ip_s_i.data(), fpoints.at("s").ip_s_j.data(), fpoints.at("s").ip_s_k.data(), fpoints.at("s").c_idw_s.data(), // locations of the neighbouring s-points + weights
-        fpoints.at("s").db.data(),                                                                      // distance nearest immersed boundary point to forcing point
-        fpoints.at("s").di.data(),                                                                      // distance interpolation point to forcing point
-        fpoints.at("s").z0b.data(),                                                                     // local roughness lengths of forcing points (all scalars will have same for now..)
-        Boundary_type::Dirichlet_type,                                                                  // should contain Boundary_Type:: for all scalars (make variation between scalars possible?), also unused for evisc
-        fields.visc, fpoints.at("s").i.size(), n_idw_points,
+        fpoints.at("s").dist_b.data(),                                                                                               // distance nearest immersed boundary point to forcing point
+        fpoints.at("s").dist_i.data(),                                                                                               // distance interpolation point to forcing point
+        fpoints.at("s").z0b.data(),                                                                                                  // local roughness lengths of forcing points (all scalars will have same for now..)
+        Boundary_type::Dirichlet_type,                                                                                               // should contain Boundary_Type:: for all scalars (make variation between scalars possible?), also unused for evisc
+        fields.visc, fpoints.at("s").n_fpoints, this->n_idw_points,
         gd.icells, gd.ijcells);
 
-    // eddy viscosity should just be zero inside..
+    // eddy viscosity should just be zero inside objects
     set_ib_points_evisc(
         fields.sd.at("evisc")->fld.data(),
-        fpoints.at("s").ijk_ib.data(), TF(0.), 
-        fpoints.at("s").ijk_ib.size());
+        ibpoints.at("s").ijk.data(), TF(0.), 
+        ibpoints.at("s").n_ibpoints);
 
-    // SvdL, 25-06-2023: STILL ADD FOR EVISCS, if needed?? -> Deardorff scheme?
+    // SvdL, 20240901: add check if Deardorff scheme is used; then also apply procedure to eviscs? (assume Pr=1 so close to surface?)
 
-    // this one is needed.. SvdL, 15-06-2023: do check 
+    // Enforce cyclic boundary conditions for updated evisc
     boundary_cyclic.exec(fields.sd.at("evisc")->fld.data());
 }
 
@@ -1168,8 +1209,6 @@ void Immersed_boundary<TF>::exec(const double dt)
 
     auto &gd = grid.get_grid_data();
 
-    // SvdL, 21-05-2023: this approach is only valid IF forcing point of one variable does not end up in interpolation component of another.
-    // NOTE: 14-06-2023: waarom mag je hier ip_u_i data gewoon als array meegeven, (zie function definition) maar moet je hem ergens anders bijv weer als vector behandelen..
     set_forcing_points_u(
         fields.mt.at("u")->fld.data(),
         fields.mt.at("v")->fld.data(),
@@ -1177,26 +1216,26 @@ void Immersed_boundary<TF>::exec(const double dt)
         fields.mp.at("u")->fld.data(),
         fields.mp.at("v")->fld.data(),
         fields.mp.at("w")->fld.data(),
-        fpoints.at("u").mbot.data(),                                                                                            // value of boundary conditions to be enforced
-        fpoints.at("u").i.data(), fpoints.at("u").j.data(), fpoints.at("u").k.data(),                                           // points to be forced
-        fpoints.at("u").rot.data(),                                                                                             // rotational matrix for local surface alignment
+        fpoints.at("u").mbot.data(),                                                                                                 // value of boundary conditions to be enforced
+        fpoints.at("u").i.data(), fpoints.at("u").j.data(), fpoints.at("u").k.data(),                                                // points to be forced
+        fpoints.at("u").rot.data(),                                                                                                  // rotational matrix for local surface alignment
         fpoints.at("u").ip_u_i.data(), fpoints.at("u").ip_u_j.data(), fpoints.at("u").ip_u_k.data(), fpoints.at("u").c_idw_u.data(), // locations of the neighbouring u-points + weights
         fpoints.at("u").ip_v_i.data(), fpoints.at("u").ip_v_j.data(), fpoints.at("u").ip_v_k.data(), fpoints.at("u").c_idw_v.data(), // locations of the neighbouring v-points + weights
         fpoints.at("u").ip_w_i.data(), fpoints.at("u").ip_w_j.data(), fpoints.at("u").ip_w_k.data(), fpoints.at("u").c_idw_w.data(), // locations of the neighbouring w-points + weights
         fpoints.at("u").ip_s_i.data(), fpoints.at("u").ip_s_j.data(), fpoints.at("u").ip_s_k.data(), fpoints.at("u").c_idw_s.data(), // locations of the neighbouring s-points + weights
-        fpoints.at("u").db.data(),                                                                                              // distance nearest immersed boundary point to forcing point
-        fpoints.at("u").di.data(),                                                                                              // distance interpolation point to forcing point
-        fpoints.at("u").z0b.data(),                                                                                             // local roughness lengths of forcing points
-        Boundary_type::Dirichlet_type,                                                                                          // only allow no-slip conditions for momentum (for now..)
-        fields.visc, fpoints.at("u").i.size(), n_idw_points,
+        fpoints.at("u").dist_b.data(),                                                                                               // distance nearest immersed boundary point to forcing point
+        fpoints.at("u").dist_i.data(),                                                                                               // distance interpolation point to forcing point
+        fpoints.at("u").z0b.data(),                                                                                                  // local roughness lengths of forcing points
+        Boundary_type::Dirichlet_type,                                                                                               // only allow no-slip conditions for momentum (for now..)
+        fields.visc, fpoints.at("u").n_fpoints, this->n_idw_points,
         gd.icells, gd.ijcells,
         dt);
     
     set_ib_points(
         fields.mt.at("u")->fld.data(),
         fields.mp.at("u")->fld.data(),
-        fpoints.at("u").ijk_ib.data(), TF(0.), 
-        fpoints.at("u").ijk_ib.size(),
+        ibpoints.at("u").ijk.data(), TF(0.), 
+        ibpoints.at("u").n_ibpoints,
         dt);
 
     set_forcing_points_v(
@@ -1206,26 +1245,26 @@ void Immersed_boundary<TF>::exec(const double dt)
         fields.mp.at("u")->fld.data(),
         fields.mp.at("v")->fld.data(),
         fields.mp.at("w")->fld.data(),
-        fpoints.at("v").mbot.data(),                                                                    // value of boundary conditions to be enforced
-        fpoints.at("v").i.data(), fpoints.at("v").j.data(), fpoints.at("v").k.data(),                   // points to be forced
-        fpoints.at("v").rot.data(),                                                                     // rotational matrix for local surface alignment
+        fpoints.at("v").mbot.data(),                                                                                                 // value of boundary conditions to be enforced
+        fpoints.at("v").i.data(), fpoints.at("v").j.data(), fpoints.at("v").k.data(),                                                // points to be forced
+        fpoints.at("v").rot.data(),                                                                                                  // rotational matrix for local surface alignment
         fpoints.at("v").ip_u_i.data(), fpoints.at("u").ip_u_j.data(), fpoints.at("v").ip_u_k.data(), fpoints.at("v").c_idw_u.data(), // locations of the neighbouring u-points + weights
         fpoints.at("v").ip_v_i.data(), fpoints.at("v").ip_v_j.data(), fpoints.at("v").ip_v_k.data(), fpoints.at("v").c_idw_v.data(), // locations of the neighbouring v-points + weights
         fpoints.at("v").ip_w_i.data(), fpoints.at("v").ip_w_j.data(), fpoints.at("v").ip_w_k.data(), fpoints.at("v").c_idw_w.data(), // locations of the neighbouring w-points + weights
         fpoints.at("v").ip_s_i.data(), fpoints.at("v").ip_s_j.data(), fpoints.at("v").ip_s_k.data(), fpoints.at("v").c_idw_s.data(), // locations of the neighbouring s-points + weights
-        fpoints.at("v").db.data(),                                                                      // distance nearest immersed boundary point to forcing point
-        fpoints.at("v").di.data(),                                                                      // distance interpolation point to forcing point
-        fpoints.at("v").z0b.data(),                                                                     // local roughness lengths of forcing points
-        Boundary_type::Dirichlet_type,                                                                  // only allow no-slip conditions for momentum (for now..)
-        fields.visc, fpoints.at("v").i.size(), n_idw_points,
+        fpoints.at("v").dist_b.data(),                                                                                               // distance nearest immersed boundary point to forcing point
+        fpoints.at("v").dist_i.data(),                                                                                               // distance interpolation point to forcing point
+        fpoints.at("v").z0b.data(),                                                                                                  // local roughness lengths of forcing points
+        Boundary_type::Dirichlet_type,                                                                                               // only allow no-slip conditions for momentum (for now..)
+        fields.visc, fpoints.at("v").n_fpoints, this->n_idw_points,
         gd.icells, gd.ijcells, 
         dt);
 
     set_ib_points(
         fields.mt.at("v")->fld.data(),
         fields.mp.at("v")->fld.data(),
-        fpoints.at("v").ijk_ib.data(), TF(0.), 
-        fpoints.at("v").ijk_ib.size(),
+        ibpoints.at("v").ijk.data(), TF(0.), 
+        ibpoints.at("v").n_ibpoints,
         dt);
 
     set_forcing_points_w(
@@ -1235,34 +1274,34 @@ void Immersed_boundary<TF>::exec(const double dt)
         fields.mp.at("u")->fld.data(),
         fields.mp.at("v")->fld.data(),
         fields.mp.at("w")->fld.data(),
-        fpoints.at("w").mbot.data(),                                                                    // value of boundary conditions to be enforced
-        fpoints.at("w").i.data(), fpoints.at("w").j.data(), fpoints.at("w").k.data(),                   // points to be forced
-        fpoints.at("w").rot.data(),                                                                     // rotational matrix for local surface alignment
+        fpoints.at("w").mbot.data(),                                                                                                 // value of boundary conditions to be enforced
+        fpoints.at("w").i.data(), fpoints.at("w").j.data(), fpoints.at("w").k.data(),                                                // points to be forced
+        fpoints.at("w").rot.data(),                                                                                                  // rotational matrix for local surface alignment
         fpoints.at("w").ip_u_i.data(), fpoints.at("w").ip_u_j.data(), fpoints.at("w").ip_u_k.data(), fpoints.at("u").c_idw_u.data(), // locations of the neighbouring u-points + weights
         fpoints.at("w").ip_v_i.data(), fpoints.at("w").ip_v_j.data(), fpoints.at("w").ip_v_k.data(), fpoints.at("u").c_idw_v.data(), // locations of the neighbouring v-points + weights
         fpoints.at("w").ip_w_i.data(), fpoints.at("w").ip_w_j.data(), fpoints.at("w").ip_w_k.data(), fpoints.at("u").c_idw_w.data(), // locations of the neighbouring w-points + weights
         fpoints.at("w").ip_s_i.data(), fpoints.at("w").ip_s_j.data(), fpoints.at("w").ip_s_k.data(), fpoints.at("u").c_idw_s.data(), // locations of the neighbouring s-points + weights
-        fpoints.at("w").db.data(),                                                                      // distance nearest immersed boundary point to forcing point
-        fpoints.at("w").di.data(),                                                                      // distance interpolation point to forcing point
-        fpoints.at("w").z0b.data(),                                                                     // local roughness lengths of forcing points
-        Boundary_type::Dirichlet_type,                                                                  // only allow no-slip conditions for momentum (for now..)
-        fields.visc, fpoints.at("w").i.size(), n_idw_points,
+        fpoints.at("w").dist_b.data(),                                                                                               // distance nearest immersed boundary point to forcing point
+        fpoints.at("w").dist_i.data(),                                                                                               // distance interpolation point to forcing point
+        fpoints.at("w").z0b.data(),                                                                                                  // local roughness lengths of forcing points
+        Boundary_type::Dirichlet_type,                                                                                               // only allow no-slip conditions for momentum (for now..)
+        fields.visc, fpoints.at("w").n_fpoints, this->n_idw_points,
         gd.icells, gd.ijcells,
         dt);
 
     set_ib_points(
         fields.mt.at("w")->fld.data(),
         fields.mp.at("w")->fld.data(),
-        fpoints.at("w").ijk_ib.data(), TF(0.), 
-        fpoints.at("w").ijk_ib.size(),
+        ibpoints.at("w").ijk.data(), TF(0.), 
+        ibpoints.at("w").n_ibpoints,
         dt);
 
-    // not required here... CHECK, SvdL, 15-06-2023
+    // not required here as we impose ib via tendencies
     // boundary_cyclic.exec(fields.mt.at("u")->fld.data());
     // boundary_cyclic.exec(fields.mt.at("v")->fld.data());
     // boundary_cyclic.exec(fields.mt.at("w")->fld.data());
 
-    for (auto &it : fields.sp) // SvdL, 21-05-2023: waarom staat hier een & voor it?
+    for (auto &it : fields.sp)
     {
         set_forcing_points_c(
             fields.st.at(it.first)->fld.data(),
@@ -1270,40 +1309,34 @@ void Immersed_boundary<TF>::exec(const double dt)
             fields.mp.at("u")->fld.data(),
             fields.mp.at("v")->fld.data(),
             fields.mp.at("w")->fld.data(),
-            fpoints.at("s").sbot.at(it.first).data(),                                                       // value of boundary conditions to be enforced
-            fpoints.at("s").i.data(), fpoints.at("s").j.data(), fpoints.at("s").k.data(),                   // points to be forced
-            fpoints.at("s").rot.data(),                                                                     // rotational matrix for local surface alignment (although not used yet for scalars: DO calculate, needed for evisc)
+            fpoints.at("s").sbot.at(it.first).data(),                                                                                    // value of boundary conditions to be enforced
+            fpoints.at("s").i.data(), fpoints.at("s").j.data(), fpoints.at("s").k.data(),                                                // points to be forced
+            fpoints.at("s").rot.data(),                                                                                                  // rotational matrix for local surface alignment (although not used yet for scalars: DO calculate, needed for evisc)
             fpoints.at("s").ip_u_i.data(), fpoints.at("s").ip_u_j.data(), fpoints.at("s").ip_u_k.data(), fpoints.at("s").c_idw_u.data(), // locations of the neighbouring u-points + weights
             fpoints.at("s").ip_v_i.data(), fpoints.at("s").ip_v_j.data(), fpoints.at("s").ip_v_k.data(), fpoints.at("s").c_idw_v.data(), // locations of the neighbouring v-points + weights
             fpoints.at("s").ip_w_i.data(), fpoints.at("s").ip_w_j.data(), fpoints.at("s").ip_w_k.data(), fpoints.at("s").c_idw_w.data(), // locations of the neighbouring w-points + weights
             fpoints.at("s").ip_s_i.data(), fpoints.at("s").ip_s_j.data(), fpoints.at("s").ip_s_k.data(), fpoints.at("s").c_idw_s.data(), // locations of the neighbouring s-points + weights
-            fpoints.at("s").db.data(),                                                                      // distance nearest immersed boundary point to forcing point
-            fpoints.at("s").di.data(),                                                                      // distance interpolation point to forcing point
-            fpoints.at("s").z0b.data(),                                                                     // local roughness lengths of forcing points (all scalars will have same for now..)
-            sbc.at(it.first),                                                                                         // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
-            fields.visc, fpoints.at("s").i.size(), n_idw_points,
+            fpoints.at("s").dist_b.data(),                                                                                               // distance nearest immersed boundary point to forcing point
+            fpoints.at("s").dist_i.data(),                                                                                               // distance interpolation point to forcing point
+            fpoints.at("s").z0b.data(),                                                                                                  // local roughness lengths of forcing points (all scalars will have same for now..)
+            sbc.at(it.first),                                                                                                            // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
+            fields.visc, fpoints.at("s").n_fpoints, this->n_idw_points,
             gd.icells, gd.ijcells,
             dt);
 
-        // SvdL, 24-07-2024, backup function above: sbcbot,       // should contain Boundary_Type:: for all scalars (make variation between scalars possible?)
-        // SvdL, 14-06-2023: the value to force inside still has to be set properly..
         set_ib_points(
             fields.st.at(it.first)->fld.data(),
             it.second->fld.data(),
-            fpoints.at("s").ijk_ib.data(), TF(0.), 
-            fpoints.at("s").ijk_ib.size(),
+            ibpoints.at("s").ijk.data(), TF(0.), 
+            ibpoints.at("s").n_ibpoints,
             dt);
 
-        // not required here... CHECK, SvdL, 15-06-2023
-        // boundary_cyclic.exec(it.second->fld.data());
-        // boundary_cyclic.exec(fields.st.at(it.first)->fld.data());
     }
 
-    // SvdL, 21-05-203: plans for much much later... allowing for IB conditions to be updated
+    // SvdL, 20240909: plans for much much later... allowing for IB conditions to be updated
 }
 #endif
 
-// SvdL, 18-05-2023: fix later..
 template <typename TF>
 void Immersed_boundary<TF>::init(Input &inputin, Cross<TF> &cross)
 {
@@ -1312,46 +1345,38 @@ void Immersed_boundary<TF>::init(Input &inputin, Cross<TF> &cross)
     if (sw_ib == IB_type::Disabled)
         return;
 
-    // // SvdL, 24-05-2023: for now set this to Dirichlet for all scalars.. eventually put this in the fpoints structure per scalar.
-    // sbcbot = Boundary_type::Dirichlet_type;
-
-    // Initialize structures for forcing points
-    fpoints.emplace("u", Forcing_points<TF>());
-    fpoints.emplace("v", Forcing_points<TF>());
-    fpoints.emplace("w", Forcing_points<TF>());
-    fpoints.emplace("s", Forcing_points<TF>()); //<< always initialize one for scalars (eddy diffusivity is at this location)
-
-    // TENTATIVE SvdL, 23-07-2024: fix placement of different scalar fields (incl. temperature later). Currently, not expected to work for thermo
-    // DEFINITELY NOT THE NICEST IMPLEMENTATION... I JUST ASSUME ALSO THAT ORDERING OF SCALAR FIELDS IS EQUAL TO READ IN OF SWBOTLIST
-    if (fields.sp.size() > 0)
-    {   
-        int n = 0;
-
-        for (auto &scalar : fields.sp)
-        {   
-
-            std::string swbot = swbotlist[n];
-
-            if (swbot == "flux")
-                sbcbot = Boundary_type::Flux_type;
-            else if (swbot == "dirichlet")
-                sbcbot = Boundary_type::Dirichlet_type;
-            else if (swbot == "neumann")
-                sbcbot = Boundary_type::Neumann_type;
-            else
-            {
-                std::string error = "IB sbcbot=" + swbot + " is not a valid choice (options: dirichlet, neumann, flux)";
-                throw std::runtime_error(error);
-            }    
-
-            sbc.emplace(scalar.first, sbcbot);
-            fpoints.at("s").sbot.emplace(scalar.first, std::vector<TF>()); 
-
-            ++n;
-        }
-    }
-    
-    // SvdL, 22-05-2023: niet geheel duidelijk wat dit nu doet..
+    // // SvdL, 20240731: CHECK LATER!! onderstaande moet nog ANDERS!!! DIT WERKT ALLEEN VOOR USER...
+    // // TENTATIVE SvdL, 23-07-2024: fix placement of different scalar fields (incl. temperature later). Currently, not expected to work for thermo
+    // // DEFINITELY NOT THE NICEST IMPLEMENTATION... I JUST ASSUME ALSO THAT ORDERING OF SCALAR FIELDS IS EQUAL TO READ IN OF SWBOTLIST
+    // if (fields.sp.size() > 0)
+    // {   
+    //     int n = 0;
+    //
+    //     for (auto &scalar : fields.sp)
+    //     {   
+    //
+    //         std::string swbot = swbotlist[n];
+    //
+    //         if (swbot == "flux")
+    //             sbcbot = Boundary_type::Flux_type;
+    //         else if (swbot == "dirichlet")
+    //             sbcbot = Boundary_type::Dirichlet_type;
+    //         else if (swbot == "neumann")
+    //             sbcbot = Boundary_type::Neumann_type;
+    //         else
+    //         {
+    //             std::string error = "IB sbcbot=" + swbot + " is not a valid choice (options: dirichlet, neumann, flux)";
+    //             throw std::runtime_error(error);
+    //         }    
+    //
+    //         sbc.emplace(scalar.first, sbcbot);
+    //         fpoints.at("s").sbot.emplace(scalar.first, std::vector<TF>()); 
+    //
+    //         ++n;
+    //     }
+    // }
+    //
+    // SvdL, 20240918: not clear about original intention and how to adapt to new version
     // Check input list of cross variables (crosslist)
     // std::vector<std::string>& crosslist_global = cross.get_crosslist();
     // std::vector<std::string>::iterator it = crosslist_global.begin();
@@ -1363,7 +1388,7 @@ void Immersed_boundary<TF>::init(Input &inputin, Cross<TF> &cross)
     //         // Strip the ending.
     //         std::string scalar = *it;
     //         scalar.erase(it->length() - fluxbot_ib_string.length());
-
+    //
     //         // Check if array is exists, else cycle.
     //         if (fields.sp.find(scalar) != fields.sp.end())
     //         {
@@ -1385,447 +1410,229 @@ void Immersed_boundary<TF>::create(Input &inputin, Netcdf_handle &input_nc)
 
     if (sw_ib == IB_type::Disabled)
         return;
-    else if (sw_ib == IB_type::STL)
+
+    // Init the toolbox classes.
+    boundary_cyclic.init();
+
+    // Get grid and MPI information
+    auto& gd  = grid.get_grid_data();
+    auto& mpi = master.get_MPI_data();
+
+    const TF no_offset = 0.;
+    int nerror = 0;
+
+    // Allocate temperorary fields
+    auto sdfs = fields.get_tmp();
+    auto tmp1 = fields.get_tmp();
+    auto tmp2 = fields.get_tmp();
+
+    // Set structures for the forcing points and ib points (SDF version)
+    fpoints.emplace("u", Forcing_points<TF>());
+    fpoints.emplace("v", Forcing_points<TF>());
+    fpoints.emplace("w", Forcing_points<TF>());
+    fpoints.emplace("s", Forcing_points<TF>()); //<< always initialize one for scalars (eddy diffusivity is at this location)
+
+    ibpoints.emplace("u", IB_points<TF>());
+    ibpoints.emplace("v", IB_points<TF>());
+    ibpoints.emplace("w", IB_points<TF>());
+    ibpoints.emplace("s", IB_points<TF>());
+
+    // Read the signed distance fields for momentum positions (temporarily store in allocated tendency fields)
+    for (auto &it : fields.mt)
     {
-        return;
+        char filename[256];
+        std::sprintf(filename, "sdf.%s.%07d", it.first.c_str(), 0);
+        master.print_message("Loading \"%s\" ... ", filename);
+        
+        if (field3d_io.load_field3d(
+                    it.second->fld.data(),
+                    tmp1->fld.data(), tmp2->fld.data(),
+                    filename, no_offset,
+                    gd.kstart, gd.kend))
+        {
+            master.print_message("FAILED\n");
+            ++nerror;
+        }
+        else
+        {
+            master.print_message("OK\n");
+        }
+
+        // Communicate ghost cells to other MPI subdomains
+        boundary_cyclic.exec(it.second->fld.data());
+
     }
-    else if (sw_ib == IB_type::User)
+
+    // Read the signed distance field for scalar positions (temporarily store in tmp-field). Must exist for evisc calculation.
+    char filename[256] = "sdf.s.0000000";
+    master.print_message("Loading \"%s\" ... ", filename);
+
+    if (field3d_io.load_field3d(
+        sdfs->fld.data(),
+        tmp1->fld.data(), tmp2->fld.data(),
+        filename, no_offset,
+        gd.kstart, gd.kend))
     {
-        // Get grid and MPI information
-        auto &gd = grid.get_grid_data();
-        auto &mpi = master.get_MPI_data();
+        master.print_message("FAILED\n");
+        ++nerror;
+    }
+    else
+    {
+        master.print_message("OK\n");
+    }
 
-        const int ii = 1;
-        const int jj = gd.icells;
-        const int kk = gd.ijcells;
+    // Communicate ghost cells to other MPI subdomains
+    boundary_cyclic.exec(sdfs->fld.data());
 
-        // Offsets used in the the force points attribution
-        const int mpi_offset_x = mpi.mpicoordx * gd.imax; // + gd.igc; //SvdL, 02-06-2023: pretty sure this should be a plus sign and without adding ghost cells, they are added below
-        const int mpi_offset_y = mpi.mpicoordy * gd.jmax; // + gd.jgc;
+    // Now all SDFs are loaded, forcing points, ib points, interpolation and boundary points can be identified
+    process_sdf(
+            fpoints.at("u"), ibpoints.at("u"),
+            fields.mt.at("u")->fld.data(),  // << this contains the SDF
+            gd.xh, gd.y, gd.z,              // << location where u is defined
+            gd.dx, gd.dy, gd.dzh, gd.dzhi,
+            gd.istart, gd.jstart, gd.kstart,
+            gd.iend,   gd.jend,   gd.kend,
+            gd.icells, gd.jcells, gd.ijcells,
+            this->n_idw_points);
 
-        const int i0 = mpi_offset_x + gd.igc;             // SvdL, 02-06-2023: these represent the "beginning" and "end" values of i, j in the complete grid indexing (as if no MPI was present)
-        const int i1 = mpi_offset_x + gd.igc + gd.imax;
-        const int j0 = mpi_offset_y + gd.jgc;
-        const int j1 = mpi_offset_y + gd.jgc + gd.jmax;
+    process_sdf(
+            fpoints.at("v"), ibpoints.at("v"),
+            fields.mt.at("v")->fld.data(),  // << this contains the SDF
+            gd.x, gd.yh, gd.z,              // << location where v is defined
+            gd.dx, gd.dy, gd.dzh, gd.dzhi,
+            gd.istart, gd.jstart, gd.kstart,
+            gd.iend,   gd.jend,   gd.kend,
+            gd.icells, gd.jcells, gd.ijcells,
+            this->n_idw_points);
 
-        const int rdim = 9;
+    process_sdf(
+            fpoints.at("w"), ibpoints.at("w"),
+            fields.mt.at("w")->fld.data(),  // << this contains the SDF
+            gd.x, gd.y, gd.zh,              // << location where w is defined
+            gd.dx, gd.dy, gd.dz, gd.dzi,
+            gd.istart, gd.jstart, gd.kstart,
+            gd.iend,   gd.jend,   gd.kend,
+            gd.icells, gd.jcells, gd.ijcells,
+            this->n_idw_points);
 
-        //         // For Debugging, SvdL 24 juli 2024
-        // volatile int i = 0;
-        // char hostname[256];
-        // gethostname(hostname, sizeof(hostname));
-        // printf("PID %d on %s ready for attach\n", getpid(), hostname);
-        // fflush(stdout);
-        // while (0 == i)
-        //     sleep(5);
+    process_sdf(
+            fpoints.at("s"), ibpoints.at("s"),
+            sdfs->fld.data(),               // << this contains the SDF
+            gd.x, gd.y, gd.z,               // << location where evisc is defined
+            gd.dx, gd.dy, gd.dzh, gd.dzhi,
+            gd.istart, gd.jstart, gd.kstart,
+            gd.iend,   gd.jend,   gd.kend,
+            gd.icells, gd.jcells, gd.ijcells,
+            this->n_idw_points);
 
-        // Get IBM settings from NetCDF input.
-        Netcdf_group &init_group = input_nc.get_group("ibm");
+    // SvdL, 20240902: temporary quick fix... should be improved later
+    // Set roughness of immersed boundaries to constant for all
+    fpoints.at("u").z0b.resize(fpoints.at("u").n_fpoints);
+    fpoints.at("v").z0b.resize(fpoints.at("v").n_fpoints);
+    fpoints.at("w").z0b.resize(fpoints.at("w").n_fpoints);
+    fpoints.at("s").z0b.resize(fpoints.at("s").n_fpoints);
 
-        for (auto &it : fields.mp)
-        {
-            // 1. Make temporary vectors and read all data
-            std::string n_fpoints_dim = "nfpoints_" + it.first;
-            const int n_fpoints = init_group.get_dimension_size(n_fpoints_dim);
+    std::fill(fpoints.at("u").z0b.begin(), fpoints.at("u").z0b.end(), z0bound);
+    std::fill(fpoints.at("v").z0b.begin(), fpoints.at("v").z0b.end(), z0bound);
+    std::fill(fpoints.at("w").z0b.begin(), fpoints.at("w").z0b.end(), z0bound);
+    std::fill(fpoints.at("s").z0b.begin(), fpoints.at("s").z0b.end(), z0bound);
 
-            std::vector<int> i_fpoints(n_fpoints);
-            std::vector<int> j_fpoints(n_fpoints); 
-            std::vector<int> k_fpoints(n_fpoints); 
+    // SvdL, 20240911: temporary quick fix... should be improved later 
+    // --> currently UNUSED and internally Dirichlet value 0 is enforced; could be completely removed from functions
+    // Set momentum boundary value for momentum forcing points 
+    fpoints.at("u").mbot.resize(fpoints.at("u").n_fpoints);
+    fpoints.at("v").mbot.resize(fpoints.at("v").n_fpoints);
+    fpoints.at("w").mbot.resize(fpoints.at("w").n_fpoints);
 
-            // std::vector<TF> xb_fpoints(n_fpoints);  
-            // std::vector<TF> yb_fpoints(n_fpoints);  
-            // std::vector<TF> zb_fpoints(n_fpoints);  
+    std::fill(fpoints.at("u").mbot.begin(), fpoints.at("u").mbot.end(), TF(0.));
+    std::fill(fpoints.at("v").mbot.begin(), fpoints.at("v").mbot.end(), TF(0.));
+    std::fill(fpoints.at("w").mbot.begin(), fpoints.at("w").mbot.end(), TF(0.));
 
-            std::vector<TF> xi_fpoints(n_fpoints);  
-            std::vector<TF> yi_fpoints(n_fpoints);
-            std::vector<TF> zi_fpoints(n_fpoints);
-
-            std::vector<TF> db_fpoints(n_fpoints); 
-            std::vector<TF> di_fpoints(n_fpoints); 
-            std::vector<TF> z0b_fpoints(n_fpoints); 
-            std::vector<TF> mbot_fpoints(n_fpoints);
-            
-            std::vector<TF> nor_fpoints(3 * n_fpoints);
-           
-            std::vector<int> start = {0};
-            std::vector<int> count = {n_fpoints}; // SvdL, 01-06-2023: check if this total counter is correct
-
-            init_group.get_variable(i_fpoints, "i_" + it.first, start, count);
-            init_group.get_variable(j_fpoints, "j_" + it.first, start, count);
-            init_group.get_variable(k_fpoints, "k_" + it.first, start, count);
-
-            // init_group.get_variable(xb_fpoints, "xb_"+ it.first, start, count);
-            // init_group.get_variable(yb_fpoints, "yb_"+ it.first, start, count);
-            // init_group.get_variable(zb_fpoints, "zb_"+ it.first, start, count);
-
-            init_group.get_variable(xi_fpoints, "xi_"+ it.first, start, count);
-            init_group.get_variable(yi_fpoints, "yi_"+ it.first, start, count);
-            init_group.get_variable(zi_fpoints, "zi_"+ it.first, start, count);
-
-            init_group.get_variable(db_fpoints, "db_" + it.first, start, count);
-            init_group.get_variable(di_fpoints, "di_" + it.first, start, count);
-
-            init_group.get_variable(z0b_fpoints, "z0b_" + it.first, start, count);
-            init_group.get_variable(mbot_fpoints, "mbot_" + it.first, start, count);
-
-            count = {3 * n_fpoints};   // SvdL, 01-06-2023: check if this total counter is correct, and if needed..
-            init_group.get_variable(nor_fpoints, "nor_" + it.first, start, count);
-
-            // count = {rdim * n_fpoints}; // SvdL, 01-06-2023: check if this total counter is correct
-            // init_group.get_variable(rot_fpoints, "rot_" + it.first, start, count);
-
-            // 2. For all entries, check whether on current MPI task
-            for (int nn=0; nn<n_fpoints; ++nn)
+    // SvdL, 20240911: this is not the nicest option, default all scalars for now ZERO Dirichlet BC
+    // --> this requires that ordering of scalar settings in ini-file are consistent (e.g., in fields, etc.) 
+    // --> is there a check for this?
+    if (fields.sp.size() > 0)
+    {   
+        int n = 0;
+    
+        for (auto &scalar : fields.sp)
+        {   
+    
+            std::string swbot = swbotlist[n];
+    
+            if (swbot == "flux")
+                sbcbot = Boundary_type::Flux_type;
+            else if (swbot == "dirichlet")
+                sbcbot = Boundary_type::Dirichlet_type;
+            else if (swbot == "neumann")
+                sbcbot = Boundary_type::Neumann_type;
+            else
             {
-                int i = i_fpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
-                int j = j_fpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-                int k = k_fpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out.. << NO PROBABLY WRONG TO DO SO (SvdL, 25-07-2024)
+                std::string error = "IB sbcbot=" + swbot + " is not a valid choice (options: dirichlet, neumann, flux)";
+                throw std::runtime_error(error);
+            }    
+    
+            sbc.emplace(scalar.first, sbcbot);
+            fpoints.at("s").sbot.emplace(scalar.first, std::vector<TF>()); 
+            fpoints.at("s").sbot.at(scalar.first).resize(fpoints.at("s").n_fpoints);
 
-                // Check if grid point on this MPI task
-                if (i >= i0 && i < i1 && j >= j0 && j < j1)
-                {
-                    i -= mpi_offset_x; // if check is passed, get i,j indices as would be at current MPI task
-                    j -= mpi_offset_y;
+            std::fill(fpoints.at("s").sbot.at(scalar.first).begin(), fpoints.at("s").sbot.at(scalar.first).end(), TF(0.)); //<< SvdL, 20240911: seems to be working (BvS, please confirm?)
 
-                    const int ijk = i + j*jj + k*kk;
-
-                    // 3. Start pushing back IBM data to correct Forcing_points structure 
-                    fpoints.at(it.first).ijk_fp.push_back(ijk);
-
-                    fpoints.at(it.first).i.push_back(i);
-                    fpoints.at(it.first).j.push_back(j);
-                    fpoints.at(it.first).k.push_back(k);
-
-                    // fpoints.at(it.first).xb.push_back(xb_fpoints[nn]);
-                    // fpoints.at(it.first).yb.push_back(yb_fpoints[nn]);
-                    // fpoints.at(it.first).zb.push_back(zb_fpoints[nn]);
-
-                    fpoints.at(it.first).xi.push_back(xi_fpoints[nn]);
-                    fpoints.at(it.first).yi.push_back(yi_fpoints[nn]);
-                    fpoints.at(it.first).zi.push_back(zi_fpoints[nn]);
-
-                    fpoints.at(it.first).db.push_back(db_fpoints[nn]);
-                    fpoints.at(it.first).di.push_back(di_fpoints[nn]);
-
-                    fpoints.at(it.first).z0b.push_back(z0b_fpoints[nn]);
-                    fpoints.at(it.first).mbot.push_back(mbot_fpoints[nn]);
-
-                    fpoints.at(it.first).nor.push_back(nor_fpoints[3*nn]);   // SvdL, 02-06-2023: check these..
-                    fpoints.at(it.first).nor.push_back(nor_fpoints[3*nn+1]);
-                    fpoints.at(it.first).nor.push_back(nor_fpoints[3*nn+2]);
-
-                    // also still include components of rotation vector..? Or internally calculate in microhh..?
-                    // SvdL, 02-06-2023: stupid note here, DO replace nfoints values everywhere with some get_size operation..
-                }
-            }
-            
-            // 4. now that amount of forcing points at MPI task are known, preset containers for interpolation points and weights, and rotation matrix
-            const int fpoints_on_mpi_task = fpoints.at(it.first).i.size();
-
-            fpoints.at(it.first).ip_u_i.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_u_j.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_u_k.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_v_i.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_v_j.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_v_k.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_w_i.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_w_j.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_w_k.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_s_i.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_s_j.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).ip_s_k.resize(fpoints_on_mpi_task*n_idw_points);
-
-            fpoints.at(it.first).c_idw_u.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).c_idw_v.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).c_idw_w.resize(fpoints_on_mpi_task*n_idw_points);
-            fpoints.at(it.first).c_idw_s.resize(fpoints_on_mpi_task*n_idw_points);
-
-            fpoints.at(it.first).rot.resize(fpoints_on_mpi_task*rdim);
+            ++n;
         }
+    }
 
-        // Split loading in of scalar points in two parts - first part is always needed for eddy viscosity..
-        // (can be later changed for perfect DNS mode..)
-        // 1. Make temporary vectors and read all data
-        std::string n_fpoints_dim = "nfpoints_s";
-        const int n_fpoints = init_group.get_dimension_size(n_fpoints_dim);
-
-        std::vector<int> i_fpoints(n_fpoints);
-        std::vector<int> j_fpoints(n_fpoints); 
-        std::vector<int> k_fpoints(n_fpoints); 
-
-        // std::vector<TF> xb_fpoints(n_fpoints);  
-        // std::vector<TF> yb_fpoints(n_fpoints);  
-        // std::vector<TF> zb_fpoints(n_fpoints);  
-
-        std::vector<TF> xi_fpoints(n_fpoints);  
-        std::vector<TF> yi_fpoints(n_fpoints);
-        std::vector<TF> zi_fpoints(n_fpoints);
-
-        std::vector<TF> db_fpoints(n_fpoints); 
-        std::vector<TF> di_fpoints(n_fpoints); 
-        std::vector<TF> z0b_fpoints(n_fpoints); 
-        std::vector<TF> mbot_fpoints(n_fpoints);
-        
-        std::vector<TF> nor_fpoints(3 * n_fpoints);
-        
-        std::vector<int> start = {0};
-        std::vector<int> count = {n_fpoints}; // SvdL, 01-06-2023: check if this total counter is correct
-
-        init_group.get_variable(i_fpoints, "i_s", start, count);
-        init_group.get_variable(j_fpoints, "j_s", start, count);
-        init_group.get_variable(k_fpoints, "k_s", start, count);
-
-        // init_group.get_variable(xb_fpoints, "xb_s", start, count);
-        // init_group.get_variable(yb_fpoints, "yb_s", start, count);
-        // init_group.get_variable(zb_fpoints, "zb_s", start, count);
-
-        init_group.get_variable(xi_fpoints, "xi_s", start, count);
-        init_group.get_variable(yi_fpoints, "yi_s", start, count);
-        init_group.get_variable(zi_fpoints, "zi_s", start, count);
-
-        init_group.get_variable(db_fpoints, "db_s", start, count);
-        init_group.get_variable(di_fpoints, "di_s", start, count);
-
-        init_group.get_variable(z0b_fpoints, "z0b_s", start, count);
-        init_group.get_variable(mbot_fpoints, "mbot_s", start, count);
-
-        count = {3 * n_fpoints};   // SvdL, 01-06-2023: check if this total counter is correct, and if needed..
-        init_group.get_variable(nor_fpoints, "nor_s", start, count);
-
-        // 2. For all entries, check whether on current MPI task
-        for (int nn=0; nn<n_fpoints; ++nn)
-        {
-            int i = i_fpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
-            int j = j_fpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-            int k = k_fpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out..
-
-            // Check if grid point on this MPI task
-            if (i >= i0 && i < i1 && j >= j0 && j < j1)
-            {
-                i -= mpi_offset_x; // if check is passed, get i,j indices as would be at current MPI task
-                j -= mpi_offset_y;
-
-                const int ijk = i + j*jj + k*kk;
-
-                // 3. Start pushing back IBM data to correct Forcing_points structure 
-                fpoints.at("s").ijk_fp.push_back(ijk);
-
-                fpoints.at("s").i.push_back(i);
-                fpoints.at("s").j.push_back(j);
-                fpoints.at("s").k.push_back(k);
-
-                // fpoints.at("s").xb.push_back(xb_fpoints[nn]);
-                // fpoints.at("s").yb.push_back(yb_fpoints[nn]);
-                // fpoints.at("s").zb.push_back(zb_fpoints[nn]);
-
-                fpoints.at("s").xi.push_back(xi_fpoints[nn]);
-                fpoints.at("s").yi.push_back(yi_fpoints[nn]);
-                fpoints.at("s").zi.push_back(zi_fpoints[nn]);
-
-                fpoints.at("s").db.push_back(db_fpoints[nn]);
-                fpoints.at("s").di.push_back(di_fpoints[nn]);
-
-                fpoints.at("s").z0b.push_back(z0b_fpoints[nn]);
-                // fpoints.at("s").mbot.push_back(mbot_fpoints[nn]); // SvdL, 05-06-2023: not relevant for scalars
-
-                fpoints.at("s").nor.push_back(nor_fpoints[3*nn]);    
-                fpoints.at("s").nor.push_back(nor_fpoints[3*nn+1]);
-                fpoints.at("s").nor.push_back(nor_fpoints[3*nn+2]);
-
-            }
-        }
-
-        // 4. now that amount of forcing points at MPI task are known, preset containers for interpolation points and weights, and rotation matrix
-        const int fpoints_on_mpi_task = fpoints.at("s").i.size();
-
-        fpoints.at("s").ip_u_i.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_u_j.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_u_k.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_v_i.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_v_j.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_v_k.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_w_i.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_w_j.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_w_k.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_s_i.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_s_j.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").ip_s_k.resize(fpoints_on_mpi_task*n_idw_points);
-
-        fpoints.at("s").c_idw_u.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").c_idw_v.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").c_idw_w.resize(fpoints_on_mpi_task*n_idw_points);
-        fpoints.at("s").c_idw_s.resize(fpoints_on_mpi_task*n_idw_points);
-
-        fpoints.at("s").rot.resize(fpoints_on_mpi_task*rdim);
-
-        // this second part is only required if there are actually scalars (including temperature..)
-        if (fields.sp.size() > 0)
-        {
-            // Set scalar boundary conditions per scalar
-            // .. unfortunately, this requires looping over nn again. Can this be improved?
-            std::vector<TF> sbot_fpoints(n_fpoints);
-            start = {0};
-            count = {n_fpoints}; // SvdL, 23-05-2023: check if this total counter is correct
-        
-            for (auto &scalar : fields.sp)
-            {
-                init_group.get_variable(sbot_fpoints, "sbot_" + scalar.first, start, count); // SvdL, 24-05-2023: ik verwacht dat deze assignment niet mag..
-
-                for (int nn=0; nn<n_fpoints; ++nn)
-                {
-                    int i = i_fpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
-                    int j = j_fpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-                    int k = k_fpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out..
-
-                    // Check if grid point on this MPI task
-                    if (i >= i0 && i < i1 && j >= j0 && j < j1)
-                    {
-                        i -= mpi_offset_x; // if check is passed, get i,j indices at would be at current MPI task
-                        j -= mpi_offset_y;
-
-                        const int ijk = i + j*jj + k*kk;
-
-                        fpoints.at("s").sbot.at(scalar.first).push_back(sbot_fpoints[nn]);
-                        
-                    }
-                }
-            }
-        }
-
-        // Svd:, 14-06-2023: separately read in the indices of the ib points
-        // is probably easier to just read a full mask (requires however additional memory.. 4 fields)
-        for (auto &it : fields.mp)
-        { 
-            std::string n_ib_dim = "ibpoints_" + it.first;
-            const int n_ib = init_group.get_dimension_size(n_ib_dim);
-        
-            std::vector<int> i_ibpoints(n_ib); 
-            std::vector<int> j_ibpoints(n_ib); 
-            std::vector<int> k_ibpoints(n_ib); 
-
-            std::vector<int> start = {0};
-            std::vector<int> count = {n_ib}; // SvdL, 01-06-2023: check if this total counter is correct
-
-            init_group.get_variable(i_ibpoints, "i_ib_"+ it.first, start, count);
-            init_group.get_variable(j_ibpoints, "j_ib_"+ it.first, start, count);
-            init_group.get_variable(k_ibpoints, "k_ib_"+ it.first, start, count);
-
-            // 2. For all entries, check whether on current MPI task
-            for (int nn=0; nn<n_ib; ++nn)
-            {
-                int i = i_ibpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
-                int j = j_ibpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-                int k = k_ibpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out..
-
-                // Check if grid point on this MPI task
-                if (i >= i0 && i < i1 && j >= j0 && j < j1)
-                {
-                    i -= mpi_offset_x; // if check is passed, get i,j indices as would be at current MPI task
-                    j -= mpi_offset_y;
-
-                    const int ijk = i + j*jj + k*kk;
-                    fpoints.at(it.first).ijk_ib.push_back(ijk);
-            
-                }
-            }        
-        }
-        
-        // Finally, repeat this again for the scalar position
-        std::string n_ib_dim = "ibpoints_s";
-        const int n_ib = init_group.get_dimension_size(n_ib_dim);
-
-        std::vector<int> i_ibpoints(n_ib); 
-        std::vector<int> j_ibpoints(n_ib); 
-        std::vector<int> k_ibpoints(n_ib); 
-
-        start = {0};
-        count = {n_ib}; // SvdL, 01-06-2023: check if this total counter is correct
-
-        init_group.get_variable(i_ibpoints, "i_ib_s", start, count);
-        init_group.get_variable(j_ibpoints, "j_ib_s", start, count);
-        init_group.get_variable(k_ibpoints, "k_ib_s", start, count);
-
-        // 2. For all entries, check whether on current MPI task
-        for (int nn=0; nn<n_ib; ++nn)
-        {
-            int i = i_ibpoints[nn] + gd.igc; // SvdL, 02-06-2023: these only have local scope
-            int j = j_ibpoints[nn] + gd.jgc; // do add ghost cells, as also for serial job all i,j,k indices will have been shifted by nr of ghost cells.
-            int k = k_ibpoints[nn] + gd.kgc; // could remove ghost cell here AND above at i0, i1, j0 and j1 declerations. That would cancel out..
-
-            // Check if grid point on this MPI task
-            if (i >= i0 && i < i1 && j >= j0 && j < j1)
-            {
-                i -= mpi_offset_x; // if check is passed, get i,j indices as would be at current MPI task
-                j -= mpi_offset_y;
-
-                const int ijk = i + j*jj + k*kk;
-
-                fpoints.at("s").ijk_ib.push_back(ijk);
-
-            }
-        }        
-
-        // Init the toolbox classes.
-        boundary_cyclic.init();
-        
-        for (auto &it : fields.mp)
+    // Setup the interpolation (determine interpolation points an weights) for momentum and scalars
+    for (auto &it : fields.mp)
         {
             setup_interpolation(
-                fpoints.at(it.first).xi.data(), fpoints.at(it.first).yi.data(), fpoints.at(it.first).zi.data(),
-                fpoints.at(it.first).ip_u_i.data(), fpoints.at(it.first).ip_u_j.data(), fpoints.at(it.first).ip_u_k.data(), fpoints.at(it.first).c_idw_u.data(), 
-                fpoints.at(it.first).ip_v_i.data(), fpoints.at(it.first).ip_v_j.data(), fpoints.at(it.first).ip_v_k.data(), fpoints.at(it.first).c_idw_v.data(), 
-                fpoints.at(it.first).ip_w_i.data(), fpoints.at(it.first).ip_w_j.data(), fpoints.at(it.first).ip_w_k.data(), fpoints.at(it.first).c_idw_w.data(), 
-                fpoints.at(it.first).ip_s_i.data(), fpoints.at(it.first).ip_s_j.data(), fpoints.at(it.first).ip_s_k.data(), fpoints.at(it.first).c_idw_s.data(), 
-                fpoints.at("u").ijk_fp, fpoints.at("u").ijk_ib,  //<< this passing just has to do with the structure in which the data is saved
-                fpoints.at("v").ijk_fp, fpoints.at("v").ijk_ib,
-                fpoints.at("w").ijk_fp, fpoints.at("w").ijk_ib,
-                fpoints.at("s").ijk_fp, fpoints.at("s").ijk_ib,
-                fpoints.at(it.first).i.size(), n_idw_points_min, n_idw_points, 
-                gd.x, gd.y, gd.z, gd.xh, gd.yh, gd.zh, gd.dx, gd.dy, gd.dz,
-                gd.istart, gd.jstart, gd.kstart,
-                gd.iend, gd.jend, gd.kend,
-                gd.icells, gd.ijcells, 
-                mpi_offset_x, mpi_offset_y);
-
-            calculate_rotation_matrix(
-                fpoints.at(it.first).rot.data(), 
-                fpoints.at(it.first).nor.data(), 
-                fpoints.at(it.first).i.size());
-
+                    fpoints.at(it.first).xi, fpoints.at(it.first).yi, fpoints.at(it.first).zi,
+                    fpoints.at(it.first).ip_u_i, fpoints.at(it.first).ip_u_j, fpoints.at(it.first).ip_u_k, fpoints.at(it.first).c_idw_u, 
+                    fpoints.at(it.first).ip_v_i, fpoints.at(it.first).ip_v_j, fpoints.at(it.first).ip_v_k, fpoints.at(it.first).c_idw_v, 
+                    fpoints.at(it.first).ip_w_i, fpoints.at(it.first).ip_w_j, fpoints.at(it.first).ip_w_k, fpoints.at(it.first).c_idw_w, 
+                    fpoints.at(it.first).ip_s_i, fpoints.at(it.first).ip_s_j, fpoints.at(it.first).ip_s_k, fpoints.at(it.first).c_idw_s, 
+                    fpoints.at(it.first).i, fpoints.at(it.first).j, fpoints.at(it.first).k,
+                    fpoints.at(it.first).n_fpoints, this->n_idw_points, this->n_idw_points_min,
+                    fields.mt.at("u")->fld.data(), fields.mt.at("v")->fld.data(), fields.mt.at("w")->fld.data(), sdfs->fld.data(),                              //<< these contain the SDFs
+                    gd.x, gd.y, gd.z, 
+                    gd.xh, gd.yh, gd.zh, 
+                    gd.dx, gd.dy, 
+                    gd.dz, gd.dzh,
+                    gd.istart, gd.jstart, gd.kstart,
+                    gd.iend, gd.jend, gd.kend,
+                    gd.icells, gd.ijcells);
         }
 
-        setup_interpolation(
-            fpoints.at("s").xi.data(), fpoints.at("s").yi.data(), fpoints.at("s").zi.data(),
-            fpoints.at("s").ip_u_i.data(), fpoints.at("s").ip_u_j.data(), fpoints.at("s").ip_u_k.data(), fpoints.at("s").c_idw_u.data(), 
-            fpoints.at("s").ip_v_i.data(), fpoints.at("s").ip_v_j.data(), fpoints.at("s").ip_v_k.data(), fpoints.at("s").c_idw_v.data(), 
-            fpoints.at("s").ip_w_i.data(), fpoints.at("s").ip_w_j.data(), fpoints.at("s").ip_w_k.data(), fpoints.at("s").c_idw_w.data(), 
-            fpoints.at("s").ip_s_i.data(), fpoints.at("s").ip_s_j.data(), fpoints.at("s").ip_s_k.data(), fpoints.at("s").c_idw_s.data(), 
-            fpoints.at("u").ijk_fp, fpoints.at("u").ijk_ib,  //<< this passing just has to do with the structure in which the data is saved
-            fpoints.at("v").ijk_fp, fpoints.at("v").ijk_ib,
-            fpoints.at("w").ijk_fp, fpoints.at("w").ijk_ib,
-            fpoints.at("s").ijk_fp, fpoints.at("s").ijk_ib,
-            fpoints.at("s").i.size(), n_idw_points_min, n_idw_points, 
-            gd.x, gd.y, gd.z, gd.xh, gd.yh, gd.zh, gd.dx, gd.dy, gd.dz,
+    setup_interpolation(
+            fpoints.at("s").xi, fpoints.at("s").yi, fpoints.at("s").zi,
+            fpoints.at("s").ip_u_i, fpoints.at("s").ip_u_j, fpoints.at("s").ip_u_k, fpoints.at("s").c_idw_u, 
+            fpoints.at("s").ip_v_i, fpoints.at("s").ip_v_j, fpoints.at("s").ip_v_k, fpoints.at("s").c_idw_v, 
+            fpoints.at("s").ip_w_i, fpoints.at("s").ip_w_j, fpoints.at("s").ip_w_k, fpoints.at("s").c_idw_w, 
+            fpoints.at("s").ip_s_i, fpoints.at("s").ip_s_j, fpoints.at("s").ip_s_k, fpoints.at("s").c_idw_s, 
+            fpoints.at("s").i, fpoints.at("s").j, fpoints.at("s").k,
+            fpoints.at("s").n_fpoints, this->n_idw_points, this->n_idw_points_min,
+            fields.mt.at("u")->fld.data(), fields.mt.at("v")->fld.data(), fields.mt.at("w")->fld.data(), sdfs->fld.data(),                              //<< these contain the SDFs
+            gd.x, gd.y, gd.z, 
+            gd.xh, gd.yh, gd.zh, 
+            gd.dx, gd.dy, 
+            gd.dz, gd.dzh,
             gd.istart, gd.jstart, gd.kstart,
             gd.iend, gd.jend, gd.kend,
-            gd.icells, gd.ijcells,
-            mpi_offset_x, mpi_offset_y);
+            gd.icells, gd.ijcells);
+ 
+    // Reset tendency fields and release tmp field (temporary containers for SDFs)
+    fields.reset_tendencies();
+    fields.release_tmp(sdfs);
+    fields.release_tmp(tmp1);
+    fields.release_tmp(tmp2);
 
-        calculate_rotation_matrix(
-            fpoints.at("s").rot.data(), 
-            fpoints.at("s").nor.data(), 
-            fpoints.at("s").i.size());
-
-    }
-
-    // SvdL, 21-05-2023: output some important notes.
-    master.print_message("SvdL: Realize that statistics between 1st and 2nd layer are likely meaningless at this stage! (Because IB-values are only set after routines statistics are calculated\n");
+    // SvdL, 20240824: output some important notes
+    master.print_message("SvdL: current statistics between 1st and 2nd forcing layer are likely meaningless at this stage! (Because IB-values are only set after routines in which statistics are calculated\n");
     master.print_message("SvdL: further, the statistics at the forcing points need to be altered to the IBM forcing, with all other tendencies set to zero here.\n");
-    //     // Print some statistics (number of ghost cells)
-    //     print_statistics(ghost.at("u").i, std::string("u"), master);
+
 }
 
-// // SvdL, 18-05-2023: fix later.. for now make it BS-function
+// SvdL, 20240909: fix later.. for now make it an empty function
 template <typename TF>
 bool Immersed_boundary<TF>::has_mask(std::string mask_name)
 {
@@ -1836,7 +1643,7 @@ bool Immersed_boundary<TF>::has_mask(std::string mask_name)
     return false;
 }
 
-// // SvdL, 18-05-2023: fix later.. or now make it BS-function
+// SvdL, 20240909: fix later.. for now make it an empty function
 template <typename TF>
 void Immersed_boundary<TF>::get_mask(Stats<TF> &stats, std::string mask_name)
 {
@@ -1856,7 +1663,7 @@ void Immersed_boundary<TF>::get_mask(Stats<TF> &stats, std::string mask_name)
     // fields.release_tmp(maskh);
 }
 
-// SvdL, 18-05-2023: fix later..
+// SvdL, 20240909: fix later..
 template <typename TF>
 void Immersed_boundary<TF>::exec_cross(Cross<TF> &cross, unsigned long iotime)
 {
@@ -1894,28 +1701,6 @@ void Immersed_boundary<TF>::exec_cross(Cross<TF> &cross, unsigned long iotime)
     //     }
     // }
 }
-
-/* IMPLEMENTATION NOTES - STATE 15-06-2023
-
-This changed IBM implementation is based on Roman et al. (200x), in which the first layer of fluid points outside the IB are locally forced to comply with 
-the logarithmic law of the wall. 
-
-The ib forcings are calculated using the so-called auxiliary velocity and scalars, meaning that we first calculate what would be the fluid velocities without ibm 
-and without pressure (fluctuation) gradient forcing. These intermediate velocities are then used to determine the velocities and scalars at the forcing points. 
-These new values and the old values at the forcing points are finally used to overwrite the tendencies at the forcing points itself.
-
-Taking this approach, systematic errors in the long run are hopefully suppressed. Using the velocity at the current timestep itself, the velocities at the forcing
-points won't "match" with those at the fluid points at the next timestep. We use the knowlegde that the auxiliary velocity will be a "better" predictor of the
-velocities in the fluid at the next timestep than the current values.
-
-We DO have to apply the ibm tendencies before the pressure solver, as we DO want to still globally enforce a divergence free flow.
-
-OLD NOTE, controleer nog..
-NOTE: DIT IS EIGENLIJK ILL-DEFINED... JUIST OMDAT DE INDEX 1 KAN VERSCHILLEN (MAX) MOET JE DE SEARCH REGION UITBREIDEN OM HIER REKENING MEE TE HOUDEN.. 
-DIT KAN ER VOOR ZORGEN DAT JE DAARDOOR JUIST PUNTEN TE VER WEG MEE GAAT NEMEN, OF NIET???
-VERDERE NOTE: METHODE NEEMT IMPLICIET OOK AAN DAT JE TUSSEN 2DE EN 3DE GRIDPUNT VAN DE IB GENOEG RESOLUTIE, DAN WEL AFNAME GRADIENT HEBT Z.D.D. LOGGRADIENT RESOLVED WORDT!!
-
-*/
 
 template class Immersed_boundary<double>;
 template class Immersed_boundary<float>;

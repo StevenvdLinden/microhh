@@ -177,12 +177,12 @@ void Model<TF>::init()
 
     grid->init();
     soil_grid->init();
-    fields->init(*input, *dump, *cross, sim_mode);
+    fields->init(*input, *dump, *cross, sim_mode); // SvdL, 20240901: here the memory for all fields is allocated (filled with zeros, so not set to value)
 
     fft->init();
 
     boundary->init(*input, *thermo);
-    ib->init(*input, *cross); //SvdL, 20-05-2023: init fase moet blijven, cross meegeven ook?
+    ib->init(*input, *cross); // SvdL, 20240901: immmersed boundary methods must be initialized here. check what actually happens in the init stage.
     buffer->init();
     diff->init();
     pres->init();
@@ -237,6 +237,14 @@ void Model<TF>::load()
     stats->create(*timeloop, sim_name);
     column->create(*input, *timeloop, sim_name);
 
+    // Immersed boundary is created. Keep this before fields are loaded, as "empty" momentum and pressure fields are used as containers.
+    // SvdL, 20240901: here the empty initialized fields are needed as temporary containers for SDF. Do this to prevent increasing number of 
+    // tmp-fields by 4! This should be possible because memory for fields are allocated during model.init() stage.
+    // Approach should be extendable to GPU; all settings are prepared on CPU before being fowarded to GPU [see, e.g., immersed_boundary->prepare_device() (.cu version)]
+    // If this doesn't end up working, place back to original position (after micro?) and make sure n_tmp_fields is increased by 3.. (or 2)
+    // --> BETTER TO ACTUALLY SAVE IN TENDENCY FIELDS AND USE RESET TENDENCY FUNCTION TO SAFELY PUT THEM BACK TO ZERO.. (see immersed_boundary.cxx) <<<
+    // MEANS FUNCTION CAN BE PUT BACK TO ORIGINAL POSITION (?)
+    ib->create(*input, *input_nc); // waarschijnlijk ib->create(*input, *stats) nodig?
 
     // Load the fields, and create the field statistics
     fields->load(timeloop->get_iotime());
@@ -247,9 +255,6 @@ void Model<TF>::load()
     boundary->create(*input, *input_nc, *stats, *column, *cross, *timeloop);
     boundary->set_values();
 
-    // SvdL, 18-05-2023: indien er met bepaalde snelheid geinitialiseerd wordt, is het dan ook nodig om op dat punt al de IB waardes te forceren? -> Nee, pas na eind van de standaard loop?
-    // misschien we de positie in de workflow aanpassen?
-    ib->create(*input, *input_nc); // waarschijnlijk ib->create(*input, *stats) nodig?
     buffer->create(*input, *input_nc, *stats);
     force->create(*input, *input_nc, *stats);
     source->create(*input, *input_nc);
@@ -376,11 +381,7 @@ void Model<TF>::exec()
                 boundary->exec(*thermo, *radiation, *microphys, *timeloop);
                 boundary->set_ghost_cells();
 
-                // SvdL, 20-05-2023: apply all ib settings last...
-                // // Set the immersed boundary conditions for scalars.
-                // ib->exec_scalars();
-
-                // SvdL, 18-05-2023: NOTE Controleer wat dit precies doet..
+                // SvdL, 20240901: still CHECK what this actually does and if it doesn't conflict with lines 410-412
                 // Update the outflow boundary conditions in case IB is used.
                 if (ib->get_switch() != IB_type::Disabled)
                     boundary->set_prognostic_outflow_bcs();
@@ -406,6 +407,8 @@ void Model<TF>::exec()
                 force->exec(timeloop->get_sub_time_step(), *thermo, *stats);
 
                 // Apply the immersed boundary after all flow tendencies are known, based on auxiliary velocity
+                if (ib->get_switch() != IB_type::Disabled)
+                    boundary->set_tendency_cyclic_bcs(); // << since new ibm requires tendencies to be known in ghost cells. (SvdL, 20240901: DO CHECK)
                 ib->exec(timeloop->get_sub_time_step());
 
                 // Solve the poisson equation for pressure.
