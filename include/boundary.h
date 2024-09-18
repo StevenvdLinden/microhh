@@ -97,6 +97,7 @@ class Boundary
 
         void set_prognostic_cyclic_bcs();
         void set_prognostic_outflow_bcs();
+        void set_tendency_cyclic_bcs();
 
         virtual void exec(Thermo<TF>&, Radiation<TF>&, Microphys<TF>&, Timeloop<TF>&);
         virtual void exec_stats(Stats<TF>&); ///< Execute statistics of surface

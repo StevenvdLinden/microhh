@@ -28,88 +28,163 @@
 
 class Master;
 class Input;
+class Netcdf_handle;
 template<typename> class Grid;
 template<typename> class Fields;
 template<typename> class Cross;
+// template<typename> class Diff;
 
-enum class IB_type {Disabled, DEM, User};
+enum class IB_type {Disabled, SDF};
 
-// Ghost cell info on staggered grid
+// Forcing points info on staggered grid (for SDF implementation, IB_type=SDF)
 template<typename TF>
-struct Ghost_cells
+struct Forcing_points
 {
-    int nghost;
+    int n_fpoints;
 
     //
     // CPU
     //
 
-    // Indices of IB ghost cells:
-    std::vector<int> i;     // size = number of ghost cells
+    // Indices of the points to be forced:
+    std::vector<int> i;     // size = number of forcing points
     std::vector<int> j;
     std::vector<int> k;
 
-    // Nearest location of IB to ghost cell:
-    std::vector<TF> xb;     // size = number of ghost cells
+    // Combined grid indices ijk for forcing point locations
+    std::vector<int> ijk;
+
+    // Nearest location of IB to forcing cell:
+    std::vector<TF> xb;     // size = number of forcing points
     std::vector<TF> yb;
     std::vector<TF> zb;
 
-    // Location of interpolation point outside IB:
-    std::vector<TF> xi;     // size = number of ghost cells
+    // Location of interpolation point on normal from IB to forcing cell:
+    std::vector<TF> xi;     // size = number of forcing points
     std::vector<TF> yi;
     std::vector<TF> zi;
 
-    std::vector<TF> di; // Distance ghost cell to interpolation point
+    // Local normal vectors and surface rotation matrix:
+    // std::vector<TF> nor;   // size = number of forcing points x 3
+    std::vector<TF> rot;   // size = number of forcing points x 9
 
-    // Points outside IB used for IDW interpolation:
-    std::vector<int> ip_i;     // size = number of ghost cells x n_idw_points
-    std::vector<int> ip_j;
-    std::vector<int> ip_k;
-    std::vector<TF>  ip_d;  // Distance to interpolation point
+    // Distance forcing points to immersed boundary (dist_b) and interpolation point (dist_i)
+    std::vector<TF> dist_b; 
+    std::vector<TF> dist_i; 
 
-    // Interpolation coefficients
-    std::vector<TF> c_idw;     // size = number of ghost cells x n_idw_points
-    std::vector<TF> c_idw_sum; // size = number of ghost cells
+    // Aerodynamic roughness at immersed boundary / forcing point (can be different for momentum and scalars)
+    std::vector<TF> z0b;
+
+    // Points outside IB used for IDW interpolation: //<  SvdL, 18-05-2023: remove probably the inversed distance weighting??
+    std::vector<int> ip_u_i;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    std::vector<int> ip_u_j;
+    std::vector<int> ip_u_k;
+    std::vector<int> ip_v_i;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    std::vector<int> ip_v_j;
+    std::vector<int> ip_v_k;
+    std::vector<int> ip_w_i;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    std::vector<int> ip_w_j;
+    std::vector<int> ip_w_k;
+    std::vector<int> ip_s_i;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    std::vector<int> ip_s_j;
+    std::vector<int> ip_s_k;
+
+    // Interpolation coefficients of neighbours to interpolation point: 4 vectors due to staggered grid nature.
+    std::vector<TF> c_idw_u;     // size = number of ghost points x n_idw_points
+    std::vector<TF> c_idw_v;     // size = number of ghost points x n_idw_points
+    std::vector<TF> c_idw_w;     // size = number of ghost points x n_idw_points
+    std::vector<TF> c_idw_s;     // size = number of ghost points x n_idw_points
 
     // Spatially varying scalar (and momentum..) boundary conditions
     std::map<std::string, std::vector<TF>> sbot;
     std::vector<TF> mbot;
     
-    //
-    // GPU 
-    //
+    // //
+    // // GPU 
+    // //
 
-    // Indices of IB ghost cells:
-    int* i_g;
+    // Indices of the points to be forced:
+    int* i_g;     // size = number of forcing points
     int* j_g;
     int* k_g;
 
-    // Nearest location of IB to ghost cell:
-    TF* xb_g;
-    TF* yb_g;
-    TF* zb_g;
+    // // Combined grid indices ijk for forcing point locations
+    // int* ijk_g;
 
-    // Location of interpolation point outside IB:
-    TF* xi_g;
-    TF* yi_g;
-    TF* zi_g;
+    // // Nearest location of IB to forcing cell:
+    // TF* xb_g;     // size = number of forcing points
+    // TF* yb_g;
+    // TF* zb_g;
 
-    TF* di_g;  // Distance ghost cell to interpolation point
+    // // Location of interpolation point on normal from IB to forcing cell:
+    // TF* xi_g;     // size = number of forcing points
+    // TF* yi_g;
+    // TF* zi_g;
 
-    // Points outside IB used for IDW interpolation:
-    int* ip_i_g;
-    int* ip_j_g;
-    int* ip_k_g;
-    TF* ip_d_g;
+    // Local normal vectors and surface rotation matrix:
+    // std::vector<TF> nor;   // size = number of forcing points x 3
+    TF* rot_g;   // size = number of forcing points x 9
 
-    // Interpolation coefficients
-    TF* c_idw_g;
-    TF* c_idw_sum_g;
+    // Distance forcing points to immersed boundary (dist_b) and interpolation point (dist_i)
+    TF* dist_b_g; 
+    TF* dist_i_g; 
+
+    // Aerodynamic roughness at immersed boundary / forcing point (can be different for momentum and scalars)
+    TF* z0b_g;
+
+    // Points outside IB used for IDW interpolation: //<  SvdL, 18-05-2023: remove probably the inversed distance weighting??
+    int* ip_u_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_u_j_g;
+    int* ip_u_k_g;
+    int* ip_v_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_v_j_g;
+    int* ip_v_k_g;
+    int* ip_w_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_w_j_g;
+    int* ip_w_k_g;
+    int* ip_s_i_g;  // size = number of forcing points x n_idw_points (SvdL, check this comment)
+    int* ip_s_j_g;
+    int* ip_s_k_g;
+
+    // Interpolation coefficients of neighbours to interpolation point: 4 vectors due to staggered grid nature.
+    TF* c_idw_u_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_v_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_w_g;     // size = number of ghost points x n_idw_points
+    TF* c_idw_s_g;     // size = number of ghost points x n_idw_points
 
     // Spatially varying scalar (and momentum..) boundary conditions
     std::map<std::string, TF*> sbot_g;
     TF* mbot_g;
+    
 };
+
+template<typename TF>
+struct IB_points
+{
+    int n_ibpoints;             // number of ib points (i.e., within object)
+
+    //
+    // CPU
+    //
+
+    // Indices of the ib points:
+    std::vector<int> i;        // size = number of ib points
+    std::vector<int> j;
+    std::vector<int> k;
+    std::vector<int> ijk;
+
+    // //
+    // // GPU 
+    // //
+
+    // Indices of the points to be forced:
+    int* i_g;     // size = number of ib points
+    int* j_g;
+    int* k_g;
+    int* ijk_g;
+
+};
+
 
 // Convenience struct to simplify sorting
 template<typename TF>
@@ -129,10 +204,10 @@ class Immersed_boundary
         ~Immersed_boundary();
 
         void init(Input&, Cross<TF>&);
-        void create();
+        void create(Input&, Netcdf_handle&);
 
-        void exec_momentum();
-        void exec_scalars();
+        void exec_viscosity();
+        void exec(double);
 
         void exec_cross(Cross<TF>&, unsigned long);
 
@@ -149,30 +224,35 @@ class Immersed_boundary
         Master& master;
         Grid<TF>& grid;
         Fields<TF>& fields;
+        // Diff<TF>& diff;
         Field3d_io<TF> field3d_io;
         Boundary_cyclic<TF> boundary_cyclic;
 
         IB_type sw_ib;
 
         int n_idw_points;       // Number of interpolation points in IDW interpolation
+        int n_idw_points_min;   // Minimum number of interpolation points in IDW interpolation
 
-        // Boundary conditions for scalars
+        // Boundary type for scalars
+        // SvdL, 20240724: for now, keep constant for all buildings points (later to be included in map sbot above)
         Boundary_type sbcbot;
-        std::map<std::string, TF> sbc;
-        std::vector<std::string> sbot_spatial_list;
+        std::vector<std::string> swbotlist; //<< list containing boundary type per scalar (later incl. temperature separately!)
+        std::map<std::string, Boundary_type> sbc; //<< not implemented yet
+        
+        // std::vector<std::string> sbot_spatial_list; //<< not implemented yet
 
-        // IB input from DEM
-        std::vector<TF> dem;
-        std::vector<unsigned int> k_dem;
-
-        // All ghost cell properties
-        std::map<std::string, Ghost_cells<TF>> ghost;
+        // All forcing points and ib properties
+        std::map<std::string, Forcing_points<TF>> fpoints;
+        std::map<std::string, IB_points<TF>> ibpoints;
 
         // Statistics
         std::vector<std::string> available_masks;
 
         // Cross-sections
         std::vector<std::string> crosslist;
+
+        // Additional parameters for ib
+        TF z0bound;
 };
 
 #endif

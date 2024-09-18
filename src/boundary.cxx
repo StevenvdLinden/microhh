@@ -461,6 +461,22 @@ void Boundary<TF>::set_prognostic_cyclic_bcs()
 }
 #endif
 
+// SvdL, 20240901: helper function for new immersed boundary method (requires tendency fields at ghost cells)
+#ifndef USECUDA
+template<typename TF>
+void Boundary<TF>::set_tendency_cyclic_bcs()
+{
+    /* Set cyclic boundary conditions of all
+        3D tendency fields */
+
+    boundary_cyclic.exec(fields.mt.at("u")->fld.data());
+    boundary_cyclic.exec(fields.mt.at("v")->fld.data());
+    boundary_cyclic.exec(fields.mt.at("w")->fld.data());
+
+    for (auto& it : fields.st)
+        boundary_cyclic.exec(it.second->fld.data());
+}
+#endif
 
 #ifndef USECUDA
 template<typename TF>
