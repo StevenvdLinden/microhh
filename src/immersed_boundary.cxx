@@ -111,10 +111,10 @@ namespace
 
             // Calculate "semi-nearest" grid indices (i,j) of interpolation point (xi,yi,zi) 
             const int in  = static_cast<int>(std::round( (xi-x[istart]) / dx) ) + istart; // guess of center index i
-            const int jn  = static_cast<int>(std::round( (yi-y[istart]) / dy) ) + jstart; // guess of center index j
+            const int jn  = static_cast<int>(std::round( (yi-y[jstart]) / dy) ) + jstart; // guess of center index j
            
             const int inh = static_cast<int>(std::round( (xi-xh[istart]) / dx) ) + istart; // guess of face index i (used for u points)
-            const int jnh = static_cast<int>(std::round( (yi-yh[istart]) / dy) ) + jstart; // guess of face index j (used for v points)
+            const int jnh = static_cast<int>(std::round( (yi-yh[jstart]) / dy) ) + jstart; // guess of face index j (used for v points)
 
             // Do slightly different procedure for k (in case of stretched grid)
             int kn  = kstart;   // guess of center index k
